@@ -34,17 +34,17 @@ def divergence_central(B, spacing):
 rng = jr.key(0)
 
 # Regular periodic grid of points in [0,1)^3
-n = 75
+n = 64
 xs = (jnp.arange(n) + 0.5) / n
 X, Y, Z = jnp.meshgrid(xs, xs, xs, indexing="ij")
 points = jnp.stack([X, Y, Z], axis=-1).reshape((-1, 3))
 N = points.shape[0]
 
 # Build GraphGP dependency graph
-graph = gp.build_graph(points, n0=250, k=20)
+graph = gp.build_graph(points, n0=250, k=10) #k=20
 
 # Divergence-free covariance element
-cov_elem = make_div_free_rbf_covariance(ell=0.05, sigma2=1.0, periodic=True)
+cov_elem = make_div_free_rbf_covariance(ell=0.075, sigma2=1.0, periodic=True)
 
 # White parameters xi (N, 3)
 rng, key = jr.split(rng)
