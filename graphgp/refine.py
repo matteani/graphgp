@@ -403,24 +403,39 @@ def generate_vector(
     return values
 
 
-def generate_dense_vector(points: Array, cov_elem: CovElem, xi: Array) -> Array:
+def generate_dense_vector(points, cov_elem, xi, jitter=1e-6, max_tries=6):
     """
-    Dense Cholesky generation for vector-valued GP on `points` (in tree order).
-
-    points: (N, d)
-    xi:     (N, ncomp)
-    returns (N, ncomp)
+    Dense Cholesky generation for vector-valued GP on `points`.
+    jitter is added as (jitter * sigma2) * I effectively; tune if needed.
     """
     if xi.ndim != 2:
         raise ValueError(f"xi must have shape (N, ncomp). Got {xi.shape}.")
     if xi.shape[0] != len(points):
         raise ValueError("Leading dimension of xi must match number of points.")
 
-    K = compute_cov_matrix_elem(cov_elem, points, points)  # (N*ncomp, N*ncomp)
-    L = jnp.linalg.cholesky(K)
+    K = compute_cov_matrix_elem(cov_elem, points, points)
+    # enforce exact symmetry (helps a lot with numerical PD issues)
+    K = 0.5 * (K + K.T)
+
+    I = jnp.eye(K.shape[0], dtype=K.dtype)
+
+    j = jitter
+    L = None
+    for _ in range(max_tries):
+        L_try = jnp.linalg.cholesky(K + j * I)
+        if jnp.all(jnp.isfinite(L_try)):
+            L = L_try
+            break
+        j *= 10.0
+
+    if L is None:
+        raise FloatingPointError(
+            f"Cholesky failed (NaNs). Try smaller n, larger ell, or bigger jitter. "
+            f"Last jitter tried: {j}"
+        )
+
     vals = L @ xi.reshape((-1,))
     return vals.reshape((len(points), xi.shape[1]))
-
 
 def _local_conditional_mats_vector(cov_elem: CovElem, joint_points: Array, *, k: int, ncomp: int, jitter: float):
     """
@@ -475,8 +490,32 @@ def refine_vector(
         raise ValueError("xi must have shape (N-n0, ncomp).")
 
     if cuda:
-        raise NotImplementedError("Vector refinement is not implemented for the CUDA extension.")
+        if not has_cuda:
+            raise ImportError("CUDA extension not installed, cannot use cuda=True.")
 
+        meta = getattr(cov_elem, "_graphgp_cuda", None)
+        if not (isinstance(meta, dict) and meta.get("kernel") == "divfree_rbf"):
+            raise NotImplementedError(
+                "cuda=True for vector fields currently supports only cov_elem._graphgp_cuda['kernel']=='divfree_rbf'."
+            )
+
+        # kernel is specialized for 3-vector output
+        if initial_values.shape[1] != 3 or xi.shape[1] != 3:
+            raise ValueError("CUDA divfree_rbf kernel expects ncomp=3 (vector field in 3D).")
+
+        return graphgp_cuda.refine_vector_divfree_rbf(
+            points,
+            neighbors,
+            jnp.asarray(offsets, dtype=neighbors.dtype),
+            meta["ell"],
+            meta["sigma2"],
+            initial_values,
+            xi,
+            periodic=int(meta.get("periodic", 0)),
+            image_sum=int(meta.get("image_sum", 0)),
+            jitter=jitter,
+        )
+    
     k = int(neighbors.shape[1])
     ncomp = int(initial_values.shape[1])
 
