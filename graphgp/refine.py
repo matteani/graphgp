@@ -160,6 +160,75 @@ def refine(
     return values
 
 
+def interpolate(
+    graph: Graph,
+    covariance: Tuple[Array, Array],
+    source_values: Array,
+    xi: Optional[Array] = None,
+    *,
+    cuda: bool = False,
+    fast_jit: bool = True,
+    return_full: bool = False,
+) -> Array:
+    """
+    Conditionally refine values from known source points to new target points.
+
+    This helper is intended for graphs created with
+    :func:`graphgp.build_interpolation_graph`, where the first ``n0`` original
+    points are the known source points and the remaining points are targets to
+    infer. Setting ``xi=None`` (or equivalently all zeros) returns the GraphGP
+    conditional mean on the target points, while non-zero ``xi`` adds a
+    conditional residual sample.
+
+    Args:
+        graph: Interpolation graph whose initial points correspond to the known
+            source points.
+        covariance: Scalar covariance in the usual GraphGP ``(bins, vals)`` form.
+        source_values: Values on the source points in their original user order
+            with shape ``(n0,)``.
+        xi: Optional white-noise parameters on the target points in their original
+            user order with shape ``(Nt,)``. If omitted, zeros are used.
+        return_full: If ``True``, return values on the full concatenated point set
+            ``[source_points, target_points]`` in the original order. Otherwise,
+            only return the target values.
+    """
+    n0 = len(graph.points) - len(graph.neighbors)
+    nt = len(graph.points) - n0
+
+    if source_values.ndim != 1 or len(source_values) != n0:
+        raise ValueError(f"source_values must have shape ({n0},). Got {source_values.shape}.")
+
+    if xi is None:
+        xi = jnp.zeros((nt,), dtype=source_values.dtype)
+    elif xi.ndim != 1 or len(xi) != nt:
+        raise ValueError(f"xi must have shape ({nt},). Got {xi.shape}.")
+
+    if graph.indices is not None:
+        source_values_internal = source_values[graph.indices[:n0]]
+        xi_internal = xi[graph.indices[n0:] - n0]
+    else:
+        source_values_internal = source_values
+        xi_internal = xi
+
+    values_internal = refine(
+        graph.points,
+        graph.neighbors,
+        graph.offsets,
+        covariance,
+        source_values_internal,
+        xi_internal,
+        cuda=cuda,
+        fast_jit=fast_jit,
+    )
+
+    if graph.indices is not None:
+        values = jnp.empty_like(values_internal).at[graph.indices].set(values_internal, unique_indices=True)
+    else:
+        values = values_internal
+
+    return values if return_full else values[n0:]
+
+
 def generate_inv(
     graph: Graph,
     covariance: Tuple[Array, Array],
@@ -310,6 +379,31 @@ def cov_lookup(r, cov_bins, cov_vals):
 # Vector-valued extensions
 # =========================
 
+
+def _get_cuda_vector_kernel_params(cov_elem: CovElem, *, jitter: float, dtype, int_dtype):
+    """
+    Extract parameters for the CUDA vector-field kernel from a covariance callable.
+
+    For now the CUDA extension supports only the divergence-free magnetic RBF
+    tensor with metadata attached by ``graphgp.extras.make_div_free_rbf_covariance``
+    or an equivalent user callable exposing the same attributes.
+    """
+    kernel = getattr(cov_elem, "_graphgp_cuda_kernel", None)
+    if kernel != "div_free_rbf_vector_3":
+        raise NotImplementedError(
+            "cuda=True for vector fields currently supports only the magnetic "
+            "3x3 divergence-free RBF tensor created by "
+            "graphgp.extras.make_div_free_rbf_covariance(...), or an equivalent "
+            "callable with _graphgp_cuda_kernel='div_free_rbf_vector_3'."
+        )
+
+    ell = float(getattr(cov_elem, "_graphgp_cuda_ell"))
+    sigma2 = float(getattr(cov_elem, "_graphgp_cuda_sigma2"))
+    periodic = bool(getattr(cov_elem, "_graphgp_cuda_periodic"))
+    params = jnp.asarray([ell, sigma2, float(jitter), 1.0 if periodic else 0.0], dtype=dtype)
+    return params.astype(dtype), jnp.asarray(3, dtype=int_dtype)
+
+
 def compute_cov_matrix_elem(cov_elem: CovElem, points_a: Array, points_b: Array) -> Array:
     """
     Build the *block* covariance matrix for a vector-valued GP.
@@ -403,39 +497,24 @@ def generate_vector(
     return values
 
 
-def generate_dense_vector(points, cov_elem, xi, jitter=1e-6, max_tries=6):
+def generate_dense_vector(points: Array, cov_elem: CovElem, xi: Array) -> Array:
     """
-    Dense Cholesky generation for vector-valued GP on `points`.
-    jitter is added as (jitter * sigma2) * I effectively; tune if needed.
+    Dense Cholesky generation for vector-valued GP on `points` (in tree order).
+
+    points: (N, d)
+    xi:     (N, ncomp)
+    returns (N, ncomp)
     """
     if xi.ndim != 2:
         raise ValueError(f"xi must have shape (N, ncomp). Got {xi.shape}.")
     if xi.shape[0] != len(points):
         raise ValueError("Leading dimension of xi must match number of points.")
 
-    K = compute_cov_matrix_elem(cov_elem, points, points)
-    # enforce exact symmetry (helps a lot with numerical PD issues)
-    K = 0.5 * (K + K.T)
-
-    I = jnp.eye(K.shape[0], dtype=K.dtype)
-
-    j = jitter
-    L = None
-    for _ in range(max_tries):
-        L_try = jnp.linalg.cholesky(K + j * I)
-        if jnp.all(jnp.isfinite(L_try)):
-            L = L_try
-            break
-        j *= 10.0
-
-    if L is None:
-        raise FloatingPointError(
-            f"Cholesky failed (NaNs). Try smaller n, larger ell, or bigger jitter. "
-            f"Last jitter tried: {j}"
-        )
-
+    K = compute_cov_matrix_elem(cov_elem, points, points)  # (N*ncomp, N*ncomp)
+    L = jnp.linalg.cholesky(K)
     vals = L @ xi.reshape((-1,))
     return vals.reshape((len(points), xi.shape[1]))
+
 
 def _local_conditional_mats_vector(cov_elem: CovElem, joint_points: Array, *, k: int, ncomp: int, jitter: float):
     """
@@ -492,30 +571,18 @@ def refine_vector(
     if cuda:
         if not has_cuda:
             raise ImportError("CUDA extension not installed, cannot use cuda=True.")
-
-        meta = getattr(cov_elem, "_graphgp_cuda", None)
-        if not (isinstance(meta, dict) and meta.get("kernel") == "divfree_rbf"):
-            raise NotImplementedError(
-                "cuda=True for vector fields currently supports only cov_elem._graphgp_cuda['kernel']=='divfree_rbf'."
-            )
-
-        # kernel is specialized for 3-vector output
-        if initial_values.shape[1] != 3 or xi.shape[1] != 3:
-            raise ValueError("CUDA divfree_rbf kernel expects ncomp=3 (vector field in 3D).")
-
-        return graphgp_cuda.refine_vector_divfree_rbf(
+        params, ncomp_cuda = _get_cuda_vector_kernel_params(
+            cov_elem, jitter=jitter, dtype=points.dtype, int_dtype=neighbors.dtype
+        )
+        return graphgp_cuda.refine_vector(
             points,
             neighbors,
             jnp.asarray(offsets, dtype=neighbors.dtype),
-            meta["ell"],
-            meta["sigma2"],
             initial_values,
             xi,
-            periodic=int(meta.get("periodic", 0)),
-            image_sum=int(meta.get("image_sum", 0)),
-            jitter=jitter,
+            params,
         )
-    
+
     k = int(neighbors.shape[1])
     ncomp = int(initial_values.shape[1])
 
@@ -582,6 +649,77 @@ def refine_vector(
     return values
 
 
+def interpolate_vector(
+    graph: Graph,
+    cov_elem: CovElem,
+    source_values: Array,
+    xi: Optional[Array] = None,
+    *,
+    cuda: bool = False,
+    fast_jit: bool = True,
+    jitter: float = 0.0,
+    return_full: bool = False,
+) -> Array:
+    """
+    Conditionally refine a vector field from known source points to new target points.
+
+    This is the vector-valued counterpart of :func:`interpolate`. It is intended
+    for graphs created with :func:`graphgp.build_interpolation_graph`. With
+    ``xi=None`` the function returns the GraphGP conditional mean on the target
+    grid. Supplying non-zero ``xi`` draws a conditional refinement sample.
+
+    Args:
+        graph: Interpolation graph whose initial points correspond to the known
+            source points.
+        cov_elem: Vector covariance element ``cov_elem(x, y) -> (ncomp, ncomp)``.
+        source_values: Known vector values on the source points in their original
+            user order with shape ``(n0, ncomp)``.
+        xi: Optional white-noise parameters on the target points in their original
+            user order with shape ``(Nt, ncomp)``. If omitted, zeros are used.
+        return_full: If ``True``, return values on the full concatenated point set
+            ``[source_points, target_points]`` in the original order. Otherwise,
+            only return the target values.
+    """
+    n0 = len(graph.points) - len(graph.neighbors)
+    nt = len(graph.points) - n0
+
+    if source_values.ndim != 2 or source_values.shape[0] != n0:
+        raise ValueError(f"source_values must have shape ({n0}, ncomp). Got {source_values.shape}.")
+
+    if xi is None:
+        xi = jnp.zeros((nt, source_values.shape[1]), dtype=source_values.dtype)
+    elif xi.ndim != 2 or xi.shape[0] != nt or xi.shape[1] != source_values.shape[1]:
+        raise ValueError(
+            f"xi must have shape ({nt}, {source_values.shape[1]}). Got {xi.shape}."
+        )
+
+    if graph.indices is not None:
+        source_values_internal = source_values[graph.indices[:n0]]
+        xi_internal = xi[graph.indices[n0:] - n0]
+    else:
+        source_values_internal = source_values
+        xi_internal = xi
+
+    values_internal = refine_vector(
+        graph.points,
+        graph.neighbors,
+        graph.offsets,
+        cov_elem,
+        source_values_internal,
+        xi_internal,
+        cuda=cuda,
+        fast_jit=fast_jit,
+        jitter=jitter,
+    )
+
+    if graph.indices is not None:
+        values = jnp.empty_like(values_internal).at[graph.indices].set(values_internal, unique_indices=True)
+    else:
+        values = values_internal
+
+    return values if return_full else values[n0:]
+
+
 def generate_vector_inv(
     graph: Graph,
     cov_elem: CovElem,
@@ -645,7 +783,18 @@ def refine_vector_inv(
     if values.ndim != 2 or values.shape[0] != len(points):
         raise ValueError("values must have shape (N, ncomp).")
     if cuda:
-        raise NotImplementedError("Vector refine_inv is not implemented for the CUDA extension.")
+        if not has_cuda:
+            raise ImportError("CUDA extension not installed, cannot use cuda=True.")
+        params, ncomp_cuda = _get_cuda_vector_kernel_params(
+            cov_elem, jitter=jitter, dtype=points.dtype, int_dtype=neighbors.dtype
+        )
+        return graphgp_cuda.refine_vector_inv(
+            points,
+            neighbors,
+            jnp.asarray(offsets, dtype=neighbors.dtype),
+            values,
+            params,
+        )
 
     k = int(neighbors.shape[1])
     ncomp = int(values.shape[1])
@@ -670,10 +819,16 @@ def refine_vector_inv(
     return values[:n0], xi
 
 
-def generate_vector_logdet(graph: Graph, cov_elem: CovElem, *, jitter: float = 0.0) -> Array:
+def generate_vector_logdet(
+    graph: Graph,
+    cov_elem: CovElem,
+    *,
+    cuda: bool = False,
+    jitter: float = 0.0,
+) -> Array:
     n0 = len(graph.points) - len(graph.neighbors)
     return generate_dense_vector_logdet(graph.points[:n0], cov_elem) + refine_vector_logdet(
-        graph.points, graph.neighbors, graph.offsets, cov_elem, jitter=jitter
+        graph.points, graph.neighbors, graph.offsets, cov_elem, cuda=cuda, jitter=jitter
     )
 
 
@@ -689,8 +844,22 @@ def refine_vector_logdet(
     offsets: Tuple[int, ...],
     cov_elem: CovElem,
     *,
+    cuda: bool = False,
     jitter: float = 0.0,
 ) -> Array:
+    if cuda:
+        if not has_cuda:
+            raise ImportError("CUDA extension not installed, cannot use cuda=True.")
+        params, ncomp_cuda = _get_cuda_vector_kernel_params(
+            cov_elem, jitter=jitter, dtype=points.dtype, int_dtype=neighbors.dtype
+        )
+        return graphgp_cuda.refine_vector_logdet(
+            points,
+            neighbors,
+            jnp.asarray(offsets, dtype=neighbors.dtype),
+            params,
+        )
+
     n0 = len(points) - len(neighbors)
     k = int(neighbors.shape[1])
 

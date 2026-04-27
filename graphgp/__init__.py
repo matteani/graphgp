@@ -1,30 +1,23 @@
-# graphgp/__init__.py
-"""
-Public GraphGP API.
-
-Exports scalar & vector-valued generation / refine utilities and helper modules.
-"""
-
-from .graph import build_graph, Graph
-from . import extras
-from . import tree
-
-# --- scalar operations (existing API) ---
+from .tree import build_tree, query_preceding_neighbors
+from .graph import (
+    Graph,
+    check_graph,
+    build_graph,
+    build_interpolation_graph,
+    compute_depths,
+    order_by_depth,
+)
 from .refine import (
-    compute_cov_matrix,
     generate,
-    generate_dense,
     generate_inv,
-    generate_dense_inv,
     generate_logdet,
+    generate_dense,
+    generate_dense_inv,
     generate_dense_logdet,
     refine,
     refine_inv,
     refine_logdet,
-)
-
-# --- vector-valued extensions (added) ---
-from .refine import (
+    compute_cov_matrix,
     compute_cov_matrix_elem,
     make_separable_vector_covariance,
     generate_vector,
@@ -37,26 +30,27 @@ from .refine import (
     refine_vector_inv,
     refine_vector_logdet,
 )
+from . import extras
 
-# Public names
 __all__ = [
-    # graph builder / helpers
-    "build_graph",
+    "build_tree",
+    "query_preceding_neighbors",
     "Graph",
-    "extras",
-    "tree",
-    # scalar
-    "compute_cov_matrix",
+    "check_graph",
+    "build_graph",
+    "build_interpolation_graph",
+    "compute_depths",
+    "order_by_depth",
     "generate",
-    "generate_dense",
     "generate_inv",
-    "generate_dense_inv",
     "generate_logdet",
+    "generate_dense",
+    "generate_dense_inv",
     "generate_dense_logdet",
     "refine",
     "refine_inv",
     "refine_logdet",
-    # vector-valued
+    "compute_cov_matrix",
     "compute_cov_matrix_elem",
     "make_separable_vector_covariance",
     "generate_vector",
@@ -68,4 +62,5 @@ __all__ = [
     "refine_vector",
     "refine_vector_inv",
     "refine_vector_logdet",
+    "extras",
 ]
