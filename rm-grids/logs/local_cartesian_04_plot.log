@@ -1,0 +1,4 @@
+Wrote figures/local_cartesian_compare/prior_comparison_summary.txt
+Wrote figures/local_cartesian_compare/prior_comparison_summary.csv
+sign accuracy divfree=0.9349, standard=0.9208, delta=+0.0141
+paired counts: divfree_only=49, standard_only=22, mcnemar_p=0.00182

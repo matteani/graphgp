@@ -1,0 +1,8 @@
+Cartesian+ray node component recovery
+======================================
+Metrics are computed only at the explicit GraphGP ray quadrature nodes.
+No interpolation is used. Positive delta_r and positive nRMSE_reduction favour the div-free prior.
+
+Bx: r_divfree=0.707871, r_standard=0.511647, delta_r=+0.196223, nrmSE_divfree=0.712728, nRMSE_standard=0.95266, nRMSE_reduction=+0.239932
+By: r_divfree=0.794366, r_standard=0.634211, delta_r=+0.160155, nrmSE_divfree=0.610029, nRMSE_standard=0.787395, nRMSE_reduction=+0.177366
+Bz: r_divfree=0.812083, r_standard=0.622386, delta_r=+0.189697, nrmSE_divfree=0.57617, nRMSE_standard=0.860694, nRMSE_reduction=+0.284525

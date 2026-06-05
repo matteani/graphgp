@@ -1,0 +1,12 @@
+Wrote figures/local_healpix_logr_collocated_compare/component_recovery/component_recovery_healpix_metrics.csv
+Wrote figures/local_healpix_logr_collocated_compare/component_recovery/component_recovery_healpix_summary.txt
+
+Headline full-grid gains, div-free minus standard:
+  Bx: delta r=+0.3156, nRMSE reduction=+0.3763
+  By: delta r=+0.1593, nRMSE reduction=+0.2488
+  Bz: delta r=+0.1916, nRMSE reduction=+0.1838
+
+Main figures:
+  figures/local_healpix_logr_collocated_compare/component_recovery/05_healpix_component_shell_scatter_maps.png
+  figures/local_healpix_logr_collocated_compare/component_recovery/06_healpix_component_summary.png
+  figures/local_healpix_logr_collocated_compare/component_recovery/07_healpix_component_radial_profiles.png
