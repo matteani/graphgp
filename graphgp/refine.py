@@ -160,75 +160,6 @@ def refine(
     return values
 
 
-def interpolate(
-    graph: Graph,
-    covariance: Tuple[Array, Array],
-    source_values: Array,
-    xi: Optional[Array] = None,
-    *,
-    cuda: bool = False,
-    fast_jit: bool = True,
-    return_full: bool = False,
-) -> Array:
-    """
-    Conditionally refine values from known source points to new target points.
-
-    This helper is intended for graphs created with
-    :func:`graphgp.build_interpolation_graph`, where the first ``n0`` original
-    points are the known source points and the remaining points are targets to
-    infer. Setting ``xi=None`` (or equivalently all zeros) returns the GraphGP
-    conditional mean on the target points, while non-zero ``xi`` adds a
-    conditional residual sample.
-
-    Args:
-        graph: Interpolation graph whose initial points correspond to the known
-            source points.
-        covariance: Scalar covariance in the usual GraphGP ``(bins, vals)`` form.
-        source_values: Values on the source points in their original user order
-            with shape ``(n0,)``.
-        xi: Optional white-noise parameters on the target points in their original
-            user order with shape ``(Nt,)``. If omitted, zeros are used.
-        return_full: If ``True``, return values on the full concatenated point set
-            ``[source_points, target_points]`` in the original order. Otherwise,
-            only return the target values.
-    """
-    n0 = len(graph.points) - len(graph.neighbors)
-    nt = len(graph.points) - n0
-
-    if source_values.ndim != 1 or len(source_values) != n0:
-        raise ValueError(f"source_values must have shape ({n0},). Got {source_values.shape}.")
-
-    if xi is None:
-        xi = jnp.zeros((nt,), dtype=source_values.dtype)
-    elif xi.ndim != 1 or len(xi) != nt:
-        raise ValueError(f"xi must have shape ({nt},). Got {xi.shape}.")
-
-    if graph.indices is not None:
-        source_values_internal = source_values[graph.indices[:n0]]
-        xi_internal = xi[graph.indices[n0:] - n0]
-    else:
-        source_values_internal = source_values
-        xi_internal = xi
-
-    values_internal = refine(
-        graph.points,
-        graph.neighbors,
-        graph.offsets,
-        covariance,
-        source_values_internal,
-        xi_internal,
-        cuda=cuda,
-        fast_jit=fast_jit,
-    )
-
-    if graph.indices is not None:
-        values = jnp.empty_like(values_internal).at[graph.indices].set(values_internal, unique_indices=True)
-    else:
-        values = values_internal
-
-    return values if return_full else values[n0:]
-
-
 def generate_inv(
     graph: Graph,
     covariance: Tuple[Array, Array],
@@ -384,23 +315,40 @@ def _get_cuda_vector_kernel_params(cov_elem: CovElem, *, jitter: float, dtype, i
     """
     Extract parameters for the CUDA vector-field kernel from a covariance callable.
 
-    For now the CUDA extension supports only the divergence-free magnetic RBF
-    tensor with metadata attached by ``graphgp.extras.make_div_free_rbf_covariance``
-    or an equivalent user callable exposing the same attributes.
+    The CUDA path cannot call an arbitrary Python ``cov_elem`` from device code.
+    It therefore supports the 3-component divergence-free RBF tensor whose
+    parameters are carried as lightweight metadata on the Python callable.
     """
-    kernel = getattr(cov_elem, "_graphgp_cuda_kernel", None)
-    if kernel != "div_free_rbf_vector_3":
+    meta = getattr(cov_elem, "_graphgp_cuda", None)
+    if isinstance(meta, dict):
+        kernel = meta.get("kernel")
+        if kernel not in ("divfree_rbf", "div_free_rbf_vector_3"):
+            kernel = None
+        if bool(meta.get("image_sum", False)):
+            raise NotImplementedError(
+                "cuda=True for vector fields supports the min-image div-free RBF kernel, "
+                "but not the 27-image periodic sum variant yet."
+            )
+        ell = meta.get("ell")
+        sigma2 = meta.get("sigma2", 1.0)
+        periodic = meta.get("periodic", True)
+    else:
+        kernel = getattr(cov_elem, "_graphgp_cuda_kernel", None)
+        ell = getattr(cov_elem, "_graphgp_cuda_ell", None)
+        sigma2 = getattr(cov_elem, "_graphgp_cuda_sigma2", 1.0)
+        periodic = getattr(cov_elem, "_graphgp_cuda_periodic", True)
+
+    if kernel != "div_free_rbf_vector_3" and kernel != "divfree_rbf":
         raise NotImplementedError(
             "cuda=True for vector fields currently supports only the magnetic "
             "3x3 divergence-free RBF tensor created by "
             "graphgp.extras.make_div_free_rbf_covariance(...), or an equivalent "
-            "callable with _graphgp_cuda_kernel='div_free_rbf_vector_3'."
+            "callable carrying _graphgp_cuda metadata."
         )
+    if ell is None:
+        raise ValueError("CUDA vector covariance metadata is missing the correlation length 'ell'.")
 
-    ell = float(getattr(cov_elem, "_graphgp_cuda_ell"))
-    sigma2 = float(getattr(cov_elem, "_graphgp_cuda_sigma2"))
-    periodic = bool(getattr(cov_elem, "_graphgp_cuda_periodic"))
-    params = jnp.asarray([ell, sigma2, float(jitter), 1.0 if periodic else 0.0], dtype=dtype)
+    params = jnp.asarray([float(ell), float(sigma2), float(jitter), 1.0 if bool(periodic) else 0.0], dtype=dtype)
     return params.astype(dtype), jnp.asarray(3, dtype=int_dtype)
 
 
@@ -647,77 +595,6 @@ def refine_vector(
         batch_vals = jax.vmap(one)(coarse_points, coarse_values, fine_points, fine_xi)  # (B,ncomp)
         values = jnp.concatenate([values, batch_vals], axis=0)
     return values
-
-
-def interpolate_vector(
-    graph: Graph,
-    cov_elem: CovElem,
-    source_values: Array,
-    xi: Optional[Array] = None,
-    *,
-    cuda: bool = False,
-    fast_jit: bool = True,
-    jitter: float = 0.0,
-    return_full: bool = False,
-) -> Array:
-    """
-    Conditionally refine a vector field from known source points to new target points.
-
-    This is the vector-valued counterpart of :func:`interpolate`. It is intended
-    for graphs created with :func:`graphgp.build_interpolation_graph`. With
-    ``xi=None`` the function returns the GraphGP conditional mean on the target
-    grid. Supplying non-zero ``xi`` draws a conditional refinement sample.
-
-    Args:
-        graph: Interpolation graph whose initial points correspond to the known
-            source points.
-        cov_elem: Vector covariance element ``cov_elem(x, y) -> (ncomp, ncomp)``.
-        source_values: Known vector values on the source points in their original
-            user order with shape ``(n0, ncomp)``.
-        xi: Optional white-noise parameters on the target points in their original
-            user order with shape ``(Nt, ncomp)``. If omitted, zeros are used.
-        return_full: If ``True``, return values on the full concatenated point set
-            ``[source_points, target_points]`` in the original order. Otherwise,
-            only return the target values.
-    """
-    n0 = len(graph.points) - len(graph.neighbors)
-    nt = len(graph.points) - n0
-
-    if source_values.ndim != 2 or source_values.shape[0] != n0:
-        raise ValueError(f"source_values must have shape ({n0}, ncomp). Got {source_values.shape}.")
-
-    if xi is None:
-        xi = jnp.zeros((nt, source_values.shape[1]), dtype=source_values.dtype)
-    elif xi.ndim != 2 or xi.shape[0] != nt or xi.shape[1] != source_values.shape[1]:
-        raise ValueError(
-            f"xi must have shape ({nt}, {source_values.shape[1]}). Got {xi.shape}."
-        )
-
-    if graph.indices is not None:
-        source_values_internal = source_values[graph.indices[:n0]]
-        xi_internal = xi[graph.indices[n0:] - n0]
-    else:
-        source_values_internal = source_values
-        xi_internal = xi
-
-    values_internal = refine_vector(
-        graph.points,
-        graph.neighbors,
-        graph.offsets,
-        cov_elem,
-        source_values_internal,
-        xi_internal,
-        cuda=cuda,
-        fast_jit=fast_jit,
-        jitter=jitter,
-    )
-
-    if graph.indices is not None:
-        values = jnp.empty_like(values_internal).at[graph.indices].set(values_internal, unique_indices=True)
-    else:
-        values = values_internal
-
-    return values if return_full else values[n0:]
 
 
 def generate_vector_inv(
