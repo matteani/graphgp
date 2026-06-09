@@ -1,0 +1,3 @@
+[recon] geometry=regular_cartesian, prior=divfree_rbf, N=64000, n0=160, k=12, ndata=1920
+[recon] Running NIFTy.re optimize_kl
+Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']

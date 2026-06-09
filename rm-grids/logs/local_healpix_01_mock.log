@@ -1,0 +1,7 @@
+[healpix-logr] Building GraphGP graph: nside=4, npix=192, n_radial=20, N=3840, n0=128, k=10
+[healpix-logr] Sampling truth with prior=divfree_rbf
+[healpix-logr] Pulsars: 192 angular pixels × 8 radial shells = 1536
+[healpix-logr] Building radial RM response
+[healpix-logr] RM std=0.391, noise sigma=0.0315
+[healpix-logr] B_rms=1.621
+[healpix-logr] Saved outputs/local_healpix_logr_mock_divfree_truth.npz

@@ -1,0 +1,8 @@
+Radial-shell component recovery at explicit ray nodes
+=====================================================
+Correlation/nRMSE are computed in radial bins. Bootstrap CIs resample line-of-sight directions, not individual ray nodes.
+Positive delta_r and positive nRMSE_reduction favour the div-free prior.
+
+Bx: mean delta_r=+0.180422, mean nRMSE_reduction=+0.250295
+By: mean delta_r=+0.157268, mean nRMSE_reduction=+0.184267
+Bz: mean delta_r=+0.213773, mean nRMSE_reduction=+0.296759

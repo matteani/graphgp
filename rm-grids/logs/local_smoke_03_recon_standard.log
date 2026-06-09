@@ -1,0 +1,9 @@
+[recon] geometry=regular_cartesian, prior=standard_vector_rbf, N=8000, n0=128, k=10, ndata=96
+[recon] Running NIFTy.re optimize_kl
+Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']
+[recon] NIFTy output type: <class 'nifty.re.evi.Samples'>
+[recon] Saved reconstruction: outputs/local_smoke_recon_standard.npz
+[recon] prior=standard_vector_rbf
+[recon] reduced chi2=0.2934
+[recon] endpoint B_parallel sign accuracy=0.8333 masked=0.8462
+[recon] ell*div_rms/B_rms=0.7295

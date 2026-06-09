@@ -1,0 +1,9 @@
+[recon] geometry=healpix_logr, prior=divfree_rbf, N=3840, n0=128, k=10, ndata=1536
+[recon] Running NIFTy.re optimize_kl
+Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']
+[recon] NIFTy output type: <class 'nifty.re.evi.Samples'>
+[recon] Saved reconstruction: outputs/local_healpix_logr_recon_divfree_prior.npz
+[recon] prior=divfree_rbf
+[recon] reduced chi2=0.7114
+[recon] endpoint B_parallel sign accuracy=0.9551 masked=0.9746
+[recon] ell*div_rms/B_rms=nan

@@ -1,0 +1,31 @@
+GraphGP pulsar-RM prior comparison
+==================================
+
+divfree_rbf
+  geometry: regular_cartesian
+  truth_prior_kind: divfree_rbf
+  reconstruction_prior_kind: divfree_rbf
+  n_data: 96
+  n_points: 8000
+  reduced_chi2: 0.22800359980927354
+  sign_accuracy: 0.8125
+  sign_accuracy_masked: 0.8351648351648352
+  epsilon_est_rms: 0.28780010600306427
+  B_est_rms: 0.39485906499631945
+
+standard_vector_rbf
+  geometry: regular_cartesian
+  truth_prior_kind: divfree_rbf
+  reconstruction_prior_kind: standard_vector_rbf
+  n_data: 96
+  n_points: 8000
+  reduced_chi2: 0.29339392804541214
+  sign_accuracy: 0.8333333333333334
+  sign_accuracy_masked: 0.8461538461538461
+  epsilon_est_rms: 0.7294993036371985
+  B_est_rms: 0.485479659364232
+
+Differences: divfree - standard
+  sign_accuracy_delta: -0.0208333
+  masked_sign_accuracy_delta: -0.010989
+  reduced_chi2_delta: -0.0653903

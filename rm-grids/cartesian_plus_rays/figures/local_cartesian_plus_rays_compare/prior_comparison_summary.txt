@@ -1,0 +1,56 @@
+GraphGP pulsar-RM prior comparison
+==================================
+
+divfree_rbf
+  geometry: cartesian_plus_rays
+  truth_prior_kind: divfree_rbf
+  reconstruction_prior_kind: divfree_rbf
+  n_data: 2304
+  n_points: 35449
+  reduced_chi2: 0.653297367414939
+  sign_accuracy: 0.9157986111111112
+  sign_accuracy_low: 0.9037560405134474
+  sign_accuracy_high: 0.9264569676968634
+  sign_accuracy_masked: 0.9337294332723949
+  sign_accuracy_masked_low: 0.9225276409653094
+  sign_accuracy_masked_high: 0.9434109023366348
+  sign_count: 2110
+  sign_total: 2304
+  masked_sign_count: 2043
+  masked_sign_total: 2188
+  mask_abs_bparallel_threshold: 0.0590695726777982
+  epsilon_est_rms: 0.2984337921332158
+  B_est_rms: 0.9765775799751282
+
+standard_vector_rbf
+  geometry: cartesian_plus_rays
+  truth_prior_kind: divfree_rbf
+  reconstruction_prior_kind: standard_vector_rbf
+  n_data: 2304
+  n_points: 35449
+  reduced_chi2: 0.9430165094094032
+  sign_accuracy: 0.8980034722222222
+  sign_accuracy_low: 0.8849757893142256
+  sign_accuracy_high: 0.9097061820102574
+  sign_accuracy_masked: 0.9159049360146252
+  sign_accuracy_masked_low: 0.9035345663268708
+  sign_accuracy_masked_high: 0.9268174614969111
+  sign_count: 2069
+  sign_total: 2304
+  masked_sign_count: 2004
+  masked_sign_total: 2188
+  mask_abs_bparallel_threshold: 0.0590695726777982
+  epsilon_est_rms: 0.8634637969462311
+  B_est_rms: 1.0623928308486938
+
+Differences: divfree - standard
+  sign_accuracy_delta: 0.0177951
+  masked_sign_accuracy_delta: 0.0178245
+  reduced_chi2_delta: -0.289719
+
+Paired endpoint sign table
+  both_correct: 2028
+  divfree_only: 82
+  standard_only: 41
+  both_wrong: 153
+  mcnemar_p_value: 0.00027561763353404546
