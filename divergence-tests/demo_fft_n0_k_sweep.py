@@ -123,7 +123,8 @@ def predecessor_neighbors(points_tree, n0: int, k: int, periodic: bool = True, b
 
 
 def build_graph_local(points, *, n0: int, k: int, periodic: bool = True, boxsize: float = 1.0):
-    """Build GraphGP graph with periodic predecessor search but normal topological ordering."""
+    """Build GraphGP graph with periodic predecessor search but normal topo
+    print('Savedlogical ordering."""
     points_tree, split_dims, indices = gp.build_tree(points)
     neighbors = predecessor_neighbors(points_tree, n0=n0, k=k, periodic=periodic, boxsize=boxsize)
     depths = gp.compute_depths(neighbors, n0=n0)
