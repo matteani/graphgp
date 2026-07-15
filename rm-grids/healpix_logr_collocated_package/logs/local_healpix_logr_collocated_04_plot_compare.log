@@ -1,4 +1,0 @@
-Wrote figures/local_healpix_logr_collocated_compare/prior_comparison_summary.txt
-Wrote figures/local_healpix_logr_collocated_compare/prior_comparison_summary.csv
-sign accuracy divfree=0.9592, standard=0.9418, delta=+0.0174
-paired counts: divfree_only=72, standard_only=32, mcnemar_p=0.0001096

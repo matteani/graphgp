@@ -1,3 +1,0 @@
-[recon] geometry=healpix_logr, prior=standard_vector_rbf, N=3840, n0=128, k=10, ndata=1536
-[recon] Running NIFTy.re optimize_kl
-Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']

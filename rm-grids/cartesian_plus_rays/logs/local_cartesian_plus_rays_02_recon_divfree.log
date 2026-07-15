@@ -1,9 +1,0 @@
-[recon] geometry=cartesian_plus_rays, prior=divfree_rbf, N=35449, n0=256, k=14, ndata=2304
-[recon] Running NIFTy.re optimize_kl
-Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']
-[recon] NIFTy output type: <class 'nifty.re.evi.Samples'>
-[recon] Saved reconstruction: outputs/local_cartesian_plus_rays_recon_divfree_prior.npz
-[recon] prior=divfree_rbf
-[recon] reduced chi2=0.6533
-[recon] endpoint B_parallel sign accuracy=0.9158 masked=0.9337
-[recon] ell*div_rms/B_rms=0.2984

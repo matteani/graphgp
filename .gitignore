@@ -6,5 +6,4 @@ results/
 figures-derivdiag/
 bench_out/
 demos/
-rm/
-rm-grids/
+mocks/

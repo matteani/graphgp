@@ -1,7 +1,0 @@
-[cartesian-plus-rays] base n=30, base=27000, ray nodes=6145, endpoints=2304, unique total=35449, n0=256, k=14
-[cartesian-plus-rays] Pulsars: 384 directions × 6 shells = 2304
-[cartesian-plus-rays] Response nonzeros=72576; no interpolation weights used
-[cartesian-plus-rays] Sampling truth with prior=divfree_rbf
-[cartesian-plus-rays] RM std=0.3029, noise sigma=0.02866
-[cartesian-plus-rays] B_rms(all)=1.679, base ell*div_rms/B_rms=0.3441
-[cartesian-plus-rays] Saved outputs/local_cartesian_plus_rays_mock_divfree_truth.npz
