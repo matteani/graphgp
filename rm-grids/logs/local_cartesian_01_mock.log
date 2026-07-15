@@ -1,7 +1,0 @@
-[regular] Building GraphGP graph: n=40, Nvox=64000, n0=160, k=12
-[regular] Sampling truth with prior=divfree_rbf
-[regular] Pulsars: 320 directions × 6 shells = 1920
-[regular] Building RM response
-[regular] RM std=0.2168, noise sigma=0.02392
-[regular] B_rms=1.601, ell*div_rms/B_rms=0.3075
-[regular] Saved outputs/local_cartesian_mock_divfree_truth.npz

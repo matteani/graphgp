@@ -1,7 +1,0 @@
-[regular] Building GraphGP graph: n=20, Nvox=8000, n0=128, k=10
-[regular] Sampling truth with prior=divfree_rbf
-[regular] Pulsars: 32 directions × 3 shells = 96
-[regular] Building RM response
-[regular] RM std=0.2029, noise sigma=0.02316
-[regular] B_rms=1.696, ell*div_rms/B_rms=0.4092
-[regular] Saved outputs/local_smoke_mock_regular.npz

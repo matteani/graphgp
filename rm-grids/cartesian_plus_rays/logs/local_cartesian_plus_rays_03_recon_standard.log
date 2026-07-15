@@ -1,9 +1,0 @@
-[recon] geometry=cartesian_plus_rays, prior=standard_vector_rbf, N=35449, n0=256, k=14, ndata=2304
-[recon] Running NIFTy.re optimize_kl
-Calling jft.optimize_kl with kwargs: ['key', 'n_total_iterations', 'n_samples', 'point_estimates']
-[recon] NIFTy output type: <class 'nifty.re.evi.Samples'>
-[recon] Saved reconstruction: outputs/local_cartesian_plus_rays_recon_standard_prior.npz
-[recon] prior=standard_vector_rbf
-[recon] reduced chi2=0.943
-[recon] endpoint B_parallel sign accuracy=0.8980 masked=0.9159
-[recon] ell*div_rms/B_rms=0.8635
