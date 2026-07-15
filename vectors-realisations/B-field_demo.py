@@ -517,23 +517,7 @@ def main():
     gc.collect()
     print('Saved figures to:', OUTDIR.resolve())
 
-    def check_kernel_periodicity(cov_elem):
-        x = jnp.array([0.97, 0.23, 0.41])
-        y = jnp.array([0.04, 0.77, 0.62])
-
-        ex = jnp.array([1.0, 0.0, 0.0])
-        ey = jnp.array([0.0, 1.0, 0.0])
-        ez = jnp.array([0.0, 0.0, 1.0])
-
-        errs = {
-            "x+1 shift": jnp.max(jnp.abs(cov_elem(x, y) - cov_elem((x + ex) % 1.0, y))),
-            "y+1 shift": jnp.max(jnp.abs(cov_elem(x, y) - cov_elem((x + ey) % 1.0, y))),
-            "z+1 shift": jnp.max(jnp.abs(cov_elem(x, y) - cov_elem((x + ez) % 1.0, y))),
-        }
-        return errs
-
-    errs = check_kernel_periodicity(cov)
-    print(errs)
+   
 
 
 if __name__ == '__main__':

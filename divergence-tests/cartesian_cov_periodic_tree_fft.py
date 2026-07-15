@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.patches import Circle
 import numpy as np
 import pandas as pd
 
@@ -36,22 +36,12 @@ plt.rcParams.update({
 # ------------------------------
 
 def import_local_graphgp():
-    spec = importlib.util.find_spec('graphgp')
-    if spec is not None:
-        import graphgp as gp  # type: ignore
-        return gp
-
-    here = Path(__file__).resolve().parent
-    pkg_init = here / 'graphgp' / '__init__.py'
-    if not pkg_init.exists():
-        pkg_init = here / '__init__.py'
     spec = importlib.util.spec_from_file_location(
-        'graphgp', pkg_init, submodule_search_locations=[str(pkg_init.parent)]
+        'graphgp', 'graphgp/__init__.py'
     )
-    if spec is None or spec.loader is None:
-        raise ImportError('Could not load local graphgp package.')
     module = importlib.util.module_from_spec(spec)
     sys.modules['graphgp'] = module
+    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 
@@ -85,82 +75,6 @@ def min_image_delta(a, b, box=1.0):
     return d - box * np.round(d / box)
 
 
-def wrap_unit_point(p, box=1.0):
-    return np.mod(np.asarray(p), box)
-
-
-def query_color_cycle(n):
-    cmap = plt.get_cmap('tab10')
-    return [cmap(i % 10) for i in range(n)]
-
-
-
-
-def add_clean_figure_header(fig, title, subtitle, *, title_y=0.965, subtitle_y=0.925, x=0.065):
-    fig.text(x, title_y, title, ha='left', va='top', fontsize=18, fontweight='bold')
-    fig.text(x, subtitle_y, subtitle, ha='left', va='top', fontsize=11)
-
-
-def predecessor_legend_handles(color='tab:blue'):
-    return [
-        plt.Line2D([0], [0], marker='o', color='none', markerfacecolor='k', markeredgecolor='k', markersize=6, label='initial points'),
-        plt.Line2D([0], [0], marker='o', color='none', markerfacecolor='0.72', markeredgecolor='0.72', markersize=5, label='refined points'),
-        plt.Line2D([0], [0], marker='*', color='none', markerfacecolor=color, markeredgecolor='k', markersize=12, label='queried fine point'),
-        plt.Line2D([0], [0], color=color, lw=2.5, label='predecessor link'),
-        plt.Line2D([0], [0], marker='o', color='none', markerfacecolor='none', markeredgecolor=color, markersize=7.5, label='predecessor in unit cell'),
-        plt.Line2D([0], [0], marker='x', color=color, lw=0, markersize=8, markeredgewidth=2.0, label='wrapped replica'),
-    ]
-
-def add_unit_cell_outline_2d(ax, box=1.0, lw=1.2, color='0.25'):
-    ax.add_patch(Rectangle((0.0, 0.0), box, box, fill=False, ec=color, lw=lw, ls='--', zorder=2))
-
-
-def scatter_periodic_replicas_2d(ax, pts, pad=0.16, *, color='0.88', size=12, alpha=0.65):
-    pts = np.asarray(pts)
-    shifts = (-1.0, 0.0, 1.0)
-    for sx in shifts:
-        for sy in shifts:
-            shifted = pts + np.array([sx, sy])
-            keep = (shifted[:, 0] >= -pad) & (shifted[:, 0] <= 1.0 + pad) & (shifted[:, 1] >= -pad) & (shifted[:, 1] <= 1.0 + pad)
-            if np.any(keep):
-                ax.scatter(shifted[keep, 0], shifted[keep, 1], c=color, s=size, alpha=alpha, linewidths=0, zorder=1)
-
-
-def add_unit_cell_outline_3d(ax, box=1.0, lw=1.0, color='0.25'):
-    corners = np.array([
-        [0, 0, 0], [box, 0, 0], [box, box, 0], [0, box, 0],
-        [0, 0, box], [box, 0, box], [box, box, box], [0, box, box],
-    ], dtype=float)
-    edges = [
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
-    ]
-    for a, b in edges:
-        pa, pb = corners[a], corners[b]
-        ax.plot([pa[0], pb[0]], [pa[1], pb[1]], [pa[2], pb[2]], color=color, lw=lw, ls='--', alpha=0.85, zorder=1)
-
-
-def scatter_periodic_replicas_3d(ax, pts, pad=0.16, *, color='0.88', size=9, alpha=0.20):
-    pts = np.asarray(pts)
-    shifts = (-1.0, 0.0, 1.0)
-    for sx in shifts:
-        for sy in shifts:
-            for sz in shifts:
-                if sx == 0.0 and sy == 0.0 and sz == 0.0:
-                    continue
-                shifted = pts + np.array([sx, sy, sz])
-                keep = (
-                    (shifted[:, 0] >= -pad) & (shifted[:, 0] <= 1.0 + pad)
-                    & (shifted[:, 1] >= -pad) & (shifted[:, 1] <= 1.0 + pad)
-                    & (shifted[:, 2] >= -pad) & (shifted[:, 2] <= 1.0 + pad)
-                )
-                if np.any(keep):
-                    ax.scatter(
-                        shifted[keep, 0], shifted[keep, 1], shifted[keep, 2],
-                        c=color, s=size, alpha=alpha, linewidths=0,
-                        depthshade=False, zorder=0,
-                    )
 
 
 def predecessor_neighbors(points_tree, n0, k, periodic=False, boxsize=1.0):
@@ -257,20 +171,14 @@ def longitudinal_fraction_spectrum(Bgrid, spacing, nbins=14):
     kbins = np.linspace(0.0, kmag[mask].max() * 1.0001, nbins + 1)
     shell_mid = 0.5 * (kbins[:-1] + kbins[1:])
     shell_frac = np.full(nbins, np.nan)
-    shell_elong = np.full(nbins, np.nan)
-    shell_etot = np.full(nbins, np.nan)
     shell_counts = np.zeros(nbins, dtype=int)
     for i in range(nbins):
         m = mask & (kmag >= kbins[i]) & (kmag < kbins[i + 1])
         shell_counts[i] = int(m.sum())
         if m.any():
-            shell_elong[i] = float(np.sum(elong[m]).real)
-            shell_etot[i] = float(np.sum(etot[m]).real)
-            shell_frac[i] = shell_elong[i] / shell_etot[i]
-    total_elong = float(np.sum(elong[mask]).real)
-    total_etot = float(np.sum(etot[mask]).real)
-    total_frac = total_elong / total_etot
-    return shell_mid, shell_frac, total_frac, kmag, (kx, ky, kz), kbins, shell_counts, shell_elong, shell_etot, total_elong, total_etot
+            shell_frac[i] = elong[m].sum() / etot[m].sum()
+    total_frac = elong[mask].sum() / etot[mask].sum()
+    return shell_mid, shell_frac, total_frac, kmag, (kx, ky, kz), kbins, shell_counts
 
 
 def modewise_longitudinal_fraction(Bgrid, spacing):
@@ -442,150 +350,92 @@ def plot_corr_panel(axs, corr, ell, sigma2, subtitle):
 # Plotting
 # ------------------------------
 
-def figure_predecessor_search_2d(n=10, n0=8, k=4, pad=0.16):
+def figure_predecessor_search_2d(n=10, n0=8, k=4):
     points = make_points_2d(n)
     _, pts_tree, _, _, neigh_std = build_graph_local(points, n0=n0, k=k, periodic=False)
     _, _, _, _, neigh_per = build_graph_local(points, n0=n0, k=k, periodic=True)
-    qidx = choose_boundary_queries(pts_tree, n0=n0, nshow=3, threshold=0.16)
-    query_colors = query_color_cycle(len(qidx))
+    qidx = choose_boundary_queries(pts_tree, n0=n0, nshow=4, threshold=0.16)
 
-    fig, axs = plt.subplots(1, 2, figsize=(11.2, 6.8))
-    fig.subplots_adjust(left=0.07, right=0.97, bottom=0.20, top=0.82, wspace=0.08)
-    add_clean_figure_header(
-        fig,
-        '2D predecessor search near the boundary',
-        'Hollow circles show predecessors inside the unit cell; x-marks show wrapped replicas used by the link.',
-        title_y=0.965,
-        subtitle_y=0.925,
-    )
-
-    for ax, neigh, title, periodic in [
-        (axs[0], neigh_std, 'Standard search', False),
-        (axs[1], neigh_per, 'Periodic search', True),
+    fig, axs = plt.subplots(1, 2, figsize=(13.6, 6.2), constrained_layout=True)
+    for ax, neigh, title, color, periodic in [
+        (axs[0], neigh_std, 'Standard GraphGP predecessor search', 'tab:blue', False),
+        (axs[1], neigh_per, 'Periodic GraphGP predecessor search', 'tab:green', True),
     ]:
-        ax.grid(False)
-        ax.set_facecolor('white')
-
-        if periodic:
-            scatter_periodic_replicas_2d(ax, pts_tree[n0:], pad=pad, color='0.90', size=12, alpha=0.45)
-            scatter_periodic_replicas_2d(ax, pts_tree[:n0], pad=pad, color='0.80', size=20, alpha=0.55)
-
-        ax.scatter(pts_tree[n0:, 0], pts_tree[n0:, 1], c='0.72', s=20, zorder=2)
-        ax.scatter(pts_tree[:n0, 0], pts_tree[:n0, 1], c='k', s=34, zorder=3)
-        add_unit_cell_outline_2d(ax, lw=1.4)
-
-        for iq, idx in enumerate(qidx):
-            q = np.asarray(pts_tree[idx])
-            color = query_colors[iq]
-            ax.scatter([q[0]], [q[1]], s=150, marker='*', c=[color], edgecolors='k', linewidths=0.8, zorder=7)
+        ax.scatter(pts_tree[:n0, 0], pts_tree[:n0, 1], c='k', s=28, label='initial points')
+        ax.scatter(pts_tree[n0:, 0], pts_tree[n0:, 1], c='0.7', s=18, label='refined points')
+        for idx in qidx:
+            q = pts_tree[idx]
+            ax.scatter([q[0]], [q[1]], s=100, marker='*', c='tab:red', zorder=5)
             for nbr in neigh[idx - n0]:
-                p = np.asarray(pts_tree[nbr])
+                p = pts_tree[nbr]
                 if periodic:
                     pplot = q + min_image_delta(p, q, box=1.0)
-                    pin = wrap_unit_point(p, box=1.0)
-                    ax.plot([q[0], pplot[0]], [q[1], pplot[1]], color=color, lw=2.4, alpha=0.96, zorder=5)
-                    ax.scatter([pin[0]], [pin[1]], s=78, facecolors='none', edgecolors=[color], linewidths=1.7, zorder=6)
-                    if not (0.0 <= pplot[0] <= 1.0 and 0.0 <= pplot[1] <= 1.0):
-                        ax.scatter([pplot[0]], [pplot[1]], marker='x', s=90, c=[color], linewidths=2.2, zorder=7)
+                    ax.plot([q[0], pplot[0]], [q[1], pplot[1]], color=color, lw=2.0, alpha=0.9)
+                    if not (0 <= pplot[0] <= 1 and 0 <= pplot[1] <= 1):
+                        ax.scatter([pplot[0]], [pplot[1]], marker='x', s=54, c=color, zorder=4)
                 else:
-                    ax.plot([q[0], p[0]], [q[1], p[1]], color=color, lw=2.4, alpha=0.96, zorder=5)
-                    ax.scatter([p[0]], [p[1]], s=78, facecolors='none', edgecolors=[color], linewidths=1.7, zorder=6)
-
-        ax.set_title(title, pad=10)
+                    ax.plot([q[0], p[0]], [q[1], p[1]], color=color, lw=2.0, alpha=0.9)
+        ax.set_title(title)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_aspect('equal')
-        ax.set_xlim(-pad, 1.0 + pad)
-        ax.set_ylim(-pad, 1.0 + pad)
-        ax.set_xticks([0.0, 0.25, 0.5, 0.75, 1.0])
-        ax.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
-
-    fig.legend(
-        predecessor_legend_handles(query_colors[0] if len(query_colors) else 'tab:blue'),
-        [h.get_label() for h in predecessor_legend_handles(query_colors[0] if len(query_colors) else 'tab:blue')],
-        loc='lower center',
-        ncol=3,
-        frameon=True,
-        bbox_to_anchor=(0.5, 0.055),
-    )
-    fig.savefig(OUTDIR / 'figure_predecessor_search_2d_clear.png', bbox_inches='tight')
+        if periodic:
+            ax.set_xlim(-0.16, 1.16)
+            ax.set_ylim(-0.16, 1.16)
+        else:
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+    axs[0].legend(loc='upper right')
+    fig.savefig(OUTDIR / 'figure_predecessor_search_2d.png', bbox_inches='tight')
     plt.close(fig)
-    print('Completed figure_predecessor_search_2d_clear.png')
+    print('Completed figure_predecessor_search_2d.png')
 
-def figure_predecessor_search_3d(n=6, n0=16, k=8, pad=0.16):
+
+def figure_predecessor_search_3d(n=6, n0=16, k=8):
     points, _ = make_points_3d(n)
     _, pts_tree, _, _, neigh_std = build_graph_local(points, n0=n0, k=k, periodic=False)
     _, _, _, _, neigh_per = build_graph_local(points, n0=n0, k=k, periodic=True)
     qidx = choose_boundary_queries_3d(pts_tree, n0=n0, nshow=3, threshold=0.22)
-    query_colors = query_color_cycle(len(qidx))
 
-    fig = plt.figure(figsize=(11.8, 7.2))
-    fig.subplots_adjust(left=0.05, right=0.97, bottom=0.18, top=0.82, wspace=0.02)
-    add_clean_figure_header(
-        fig,
-        '3D predecessor search comparison',
-        'Same queried fine points in both panels, hollow markers stay in the unit cell and x-marks show the wrapped replica',
-        title_y=0.965,
-        subtitle_y=0.925,
-    )
-
+    fig = plt.figure(figsize=(13.8, 6.4), constrained_layout=True)
     ax0 = fig.add_subplot(1, 2, 1, projection='3d')
     ax1 = fig.add_subplot(1, 2, 2, projection='3d')
-
-    for ax, neigh, title, periodic in [
-        (ax0, neigh_std, 'Standard search', False),
-        (ax1, neigh_per, 'Periodic search', True),
+    for ax, neigh, title, color, periodic in [
+        (ax0, neigh_std, 'Standard GraphGP predecessor search', 'tab:blue', False),
+        (ax1, neigh_per, 'Periodic GraphGP predecessor search', 'tab:green', True),
     ]:
-        if periodic:
-            scatter_periodic_replicas_3d(ax, pts_tree[n0:], pad=pad, color='0.91', size=8, alpha=0.12)
-            scatter_periodic_replicas_3d(ax, pts_tree[:n0], pad=pad, color='0.80', size=12, alpha=0.16)
-
-        ax.scatter(pts_tree[n0:, 0], pts_tree[n0:, 1], pts_tree[n0:, 2], c='0.72', s=12, depthshade=False)
-        ax.scatter(pts_tree[:n0, 0], pts_tree[:n0, 1], pts_tree[:n0, 2], c='k', s=24, depthshade=False)
-        add_unit_cell_outline_3d(ax, lw=1.2)
-
-        for iq, idx in enumerate(qidx):
-            q = np.asarray(pts_tree[idx])
-            color = query_colors[iq]
-            ax.scatter([q[0]], [q[1]], [q[2]], s=145, marker='*', c=[color], edgecolors='k', linewidths=0.8, depthshade=False)
+        ax.scatter(pts_tree[:n0, 0], pts_tree[:n0, 1], pts_tree[:n0, 2], c='k', s=20, depthshade=False)
+        ax.scatter(pts_tree[n0:, 0], pts_tree[n0:, 1], pts_tree[n0:, 2], c='0.7', s=10, depthshade=False)
+        for idx in qidx:
+            q = pts_tree[idx]
+            ax.scatter([q[0]], [q[1]], [q[2]], s=110, marker='*', c='tab:red', depthshade=False)
             for nbr in neigh[idx - n0]:
-                p = np.asarray(pts_tree[nbr])
+                p = pts_tree[nbr]
                 if periodic:
                     pplot = q + min_image_delta(p, q, box=1.0)
-                    pin = wrap_unit_point(p, box=1.0)
-                    ax.plot([q[0], pplot[0]], [q[1], pplot[1]], [q[2], pplot[2]], color=color, lw=2.0, alpha=0.95)
-                    ax.scatter([pin[0]], [pin[1]], [pin[2]], s=60, facecolors='none', edgecolors=[color], linewidths=1.5, depthshade=False)
-                    if not np.all((0.0 <= pplot) & (pplot <= 1.0)):
-                        ax.scatter([pplot[0]], [pplot[1]], [pplot[2]], marker='x', s=62, c=[color], linewidths=2.0, depthshade=False)
+                    ax.plot([q[0], pplot[0]], [q[1], pplot[1]], [q[2], pplot[2]], color=color, lw=1.8, alpha=0.9)
+                    if not np.all((0 <= pplot) & (pplot <= 1)):
+                        ax.scatter([pplot[0]], [pplot[1]], [pplot[2]], marker='x', s=46, c=color, depthshade=False)
                 else:
-                    ax.plot([q[0], p[0]], [q[1], p[1]], [q[2], p[2]], color=color, lw=2.0, alpha=0.95)
-                    ax.scatter([p[0]], [p[1]], [p[2]], s=60, facecolors='none', edgecolors=[color], linewidths=1.5, depthshade=False)
-
-        ax.set_title(title, pad=10)
-        ax.set_xlabel('x', labelpad=6)
-        ax.set_ylabel('y', labelpad=6)
-        ax.set_zlabel('z', labelpad=6)
-        ax.set_xlim(-pad, 1.0 + pad)
-        ax.set_ylim(-pad, 1.0 + pad)
-        ax.set_zlim(-pad, 1.0 + pad)
+                    ax.plot([q[0], p[0]], [q[1], p[1]], [q[2], p[2]], color=color, lw=1.8, alpha=0.9)
+        ax.set_title(title)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+        if periodic:
+            ax.set_xlim(-0.16, 1.16)
+            ax.set_ylim(-0.16, 1.16)
+            ax.set_zlim(-0.16, 1.16)
+        else:
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.set_zlim(0, 1)
         ax.set_box_aspect((1, 1, 1))
-        ax.view_init(elev=22, azim=-58)
-        ax.xaxis.pane.set_alpha(0.0)
-        ax.yaxis.pane.set_alpha(0.0)
-        ax.zaxis.pane.set_alpha(0.0)
-        ax.grid(True, alpha=0.15)
-
-    fig.legend(
-        predecessor_legend_handles(query_colors[0] if len(query_colors) else 'tab:blue'),
-        [h.get_label() for h in predecessor_legend_handles(query_colors[0] if len(query_colors) else 'tab:blue')],
-        loc='lower center',
-        ncol=3,
-        frameon=True,
-        bbox_to_anchor=(0.5, 0.05),
-    )
-    fig.savefig(OUTDIR / 'figure_predecessor_search_3d_clear.png', bbox_inches='tight')
+        ax.view_init(elev=20, azim=-58)
+    fig.savefig(OUTDIR / 'figure_predecessor_search_3d.png', bbox_inches='tight')
     plt.close(fig)
-    print('Completed figure_predecessor_search_3d_clear.png')
+    print('Completed figure_predecessor_search_3d.png')
+
 
 def figure_field_periodicity_checks(Bstd, Bper, df):
     n = Bstd.shape[0]
@@ -628,24 +478,10 @@ def figure_field_periodicity_checks(Bstd, Bper, df):
 
 
 def figure_fft_and_k_mapping(df, shell_k, shell_curves, spacing):
-    arr_std_frac = np.vstack(shell_curves['standard']['frac'])
-    arr_per_frac = np.vstack(shell_curves['periodic']['frac'])
-    arr_std_elong = np.vstack(shell_curves['standard']['elong'])
-    arr_per_elong = np.vstack(shell_curves['periodic']['elong'])
-    arr_std_etot = np.vstack(shell_curves['standard']['etot'])
-    arr_per_etot = np.vstack(shell_curves['periodic']['etot'])
-
-    def finite_mean(arr):
-        denom = np.sum(np.isfinite(arr), axis=0)
-        return np.divide(np.nansum(arr, axis=0), denom, out=np.full(arr.shape[1], np.nan), where=denom > 0)
-
-    shell_mean_std = finite_mean(arr_std_frac)
-    shell_mean_per = finite_mean(arr_per_frac)
-    shell_mean_std_elong = finite_mean(arr_std_elong)
-    shell_mean_per_elong = finite_mean(arr_per_elong)
-    shell_mean_std_etot = finite_mean(arr_std_etot)
-    shell_mean_per_etot = finite_mean(arr_per_etot)
-
+    arr_std = np.vstack(shell_curves['standard'])
+    arr_per = np.vstack(shell_curves['periodic'])
+    shell_mean_std = np.divide(np.nansum(arr_std, axis=0), np.sum(np.isfinite(arr_std), axis=0), out=np.full(arr_std.shape[1], np.nan), where=np.sum(np.isfinite(arr_std), axis=0) > 0)
+    shell_mean_per = np.divide(np.nansum(arr_per, axis=0), np.sum(np.isfinite(arr_per), axis=0), out=np.full(arr_per.shape[1], np.nan), where=np.sum(np.isfinite(arr_per), axis=0) > 0)
     valid = np.isfinite(shell_mean_per)
     idx_min = int(np.nanargmin(shell_mean_per[valid]))
     valid_indices = np.where(valid)[0]
@@ -653,33 +489,21 @@ def figure_fft_and_k_mapping(df, shell_k, shell_curves, spacing):
     selected = [i for i in range(max(0, idx_min - 2), min(len(shell_k), idx_min + 3)) if np.isfinite(shell_k[i])]
     selected = [i for i in selected if shell_k[i] > 0]
 
-    fig = plt.figure(figsize=(15.4, 10.4))
-    gs = fig.add_gridspec(2, 2, hspace=0.32, wspace=0.34)
+    fig = plt.figure(figsize=(14.8, 10.4))
+    gs = fig.add_gridspec(2, 2, hspace=0.32, wspace=0.28)
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1])
     ax2 = fig.add_subplot(gs[1, 0])
 
-    hfrac_std = ax0.plot(shell_k, shell_mean_std, 'o-', color='tab:blue', label=r'standard $E_L/E_{\mathrm{tot}}$')
-    hfrac_per = ax0.plot(shell_k, shell_mean_per, 'o-', color='tab:orange', label=r'periodic $E_L/E_{\mathrm{tot}}$')
+    ax0.plot(shell_k, shell_mean_std, 'o-', label='standard graph search')
+    ax0.plot(shell_k, shell_mean_per, 'o-', label='periodic graph search')
     ax0.scatter([shell_k[idx_min]], [shell_mean_per[idx_min]], s=90, marker='*', color='tab:red', zorder=5, label='lowest periodic shell')
     for i in selected:
         ax0.axvline(shell_k[i], color='0.75', ls=':', lw=1.0)
-    ax0.set(title='FFT longitudinal fraction by shell, with shell powers overlaid', xlabel=r'$|k|$', ylabel=r'$E_L/E_{\mathrm{tot}}$')
+    ax0.set(title='FFT longitudinal power fraction by $|k|$ shell', xlabel=r'$|k|$', ylabel=r'$E_L/E_{\rm tot}$')
+    ax0.legend(loc='upper right')
 
-    ax0r = ax0.twinx()
-    hel_std = ax0r.plot(shell_k, shell_mean_std_elong, '--', color='tab:blue', alpha=0.70, lw=1.9, label='standard $E_L$')
-    het_std = ax0r.plot(shell_k, shell_mean_std_etot, ':', color='tab:blue', alpha=0.95, lw=2.1, label=r'standard $E_{\mathrm{tot}}$')
-    hel_per = ax0r.plot(shell_k, shell_mean_per_elong, '--', color='tab:orange', alpha=0.70, lw=1.9, label='periodic $E_L$')
-    het_per = ax0r.plot(shell_k, shell_mean_per_etot, ':', color='tab:orange', alpha=0.95, lw=2.1, label=r'periodic $E_{\mathrm{tot}}$')
-    ax0r.set_ylabel(r'shell power')
-    ax0r.set_yscale('log')
-
-    handles = hfrac_std + hfrac_per + hel_std + het_std + hel_per + het_per
-    labels = [h.get_label() for h in handles] + ['lowest periodic shell']
-    handles = handles + [plt.Line2D([0], [0], marker='*', color='tab:red', lw=0, markersize=10)]
-    ax0.legend(handles, labels, loc='upper right', fontsize=9, frameon=True)
-
-    metrics = [('eps_fd', r'$\epsilon_{\mathrm{FD}}$'), ('eps_fft', r'$\epsilon_{\mathrm{FFT}}$'), ('longitudinal_fraction_total', r'$E_L/E_{\mathrm{tot}}$')]
+    metrics = [('eps_fd', r'$\epsilon_{\rm FD}$'), ('eps_fft', r'$\epsilon_{\rm FFT}$'), ('longitudinal_fraction_total', r'$E_L/E_{\rm tot}$')]
     x = np.arange(len(metrics))
     width = 0.35
     for off, key, label in [(-width / 2, 'standard', 'standard'), (width / 2, 'periodic', 'periodic')]:
@@ -743,17 +567,16 @@ def figure_realspace_correlations(Bstd, Bper, ell, sigma2=1.0):
 
 def figure_divergence_fd_fft(Bper, coords_1d, ell, spacing):
     n = Bper.shape[0]
-    res = 1 / n
     zmid = n // 2
     Bmag = np.sqrt(np.sum(Bper ** 2, axis=-1))
     Brms = float(np.sqrt(np.mean(Bmag ** 2)))
 
     div_fd = divergence_fd_periodic(Bper, spacing)
-    eps_fd_field = res * div_fd / Brms
+    eps_fd_field = ell * div_fd / Brms
     shell_fd = radial_shell_profile(eps_fd_field, coords_1d, nbins=16)
 
     frac2d, kx_shift, ky_shift, frac_flat = modewise_longitudinal_fraction(Bper, spacing)
-    shell_k, shell_frac, total_frac, _, _, _, _, shell_elong, shell_etot, total_elong, total_etot = longitudinal_fraction_spectrum(Bper, spacing, nbins=16)
+    shell_k, shell_frac, total_frac, _, _, _, _ = longitudinal_fraction_spectrum(Bper, spacing, nbins=16)
 
     fig, axs = plt.subplots(2, 3, figsize=(16.0, 8.8))
     fig.subplots_adjust(left=0.06, right=0.985, bottom=0.10, top=0.86, wspace=0.28, hspace=0.34)
@@ -802,18 +625,12 @@ def figure_divergence_fd_fft(Bper, coords_1d, ell, spacing):
     cb1 = fig.colorbar(im1, ax=axs[1, 0], fraction=0.046, pad=0.03)
     cb1.set_label(r'$f_L(\mathbf{k})$')
 
-    hfrac = axs[1, 1].plot(shell_k, shell_frac, 'o-', lw=1.8, ms=4.0, color='tab:blue', label=r'$E_L/E_{\mathrm{tot}}$')
-    htot = axs[1, 1].axhline(total_frac, ls='--', lw=1.2, color='0.4', label=fr'total fraction = {total_frac:.3f}')
-    axs[1, 1].set_title('Longitudinal fraction by shell, with shell powers overlaid')
+    axs[1, 1].plot(shell_k, shell_frac, 'o-', lw=1.8, ms=4.0)
+    axs[1, 1].axhline(total_frac, ls='--', lw=1.2, color='0.4', label=fr'total = {total_frac:.3f}')
+    axs[1, 1].set_title('Longitudinal power fraction by $|k|$ shell')
     axs[1, 1].set_xlabel(r'$|k|$')
-    axs[1, 1].set_ylabel(r'$E_L/E_{\mathrm{tot}}$')
-    axpow = axs[1, 1].twinx()
-    hel = axpow.plot(shell_k, shell_elong, '--', color='tab:red', lw=1.8, alpha=0.75, label=r'$E_L$')
-    het = axpow.plot(shell_k, shell_etot, ':', color='tab:green', lw=2.0, alpha=0.90, label=r'$E_{\mathrm{tot}}$')
-    axpow.set_ylabel('shell power')
-    axpow.set_yscale('log')
-    handles = hfrac + hel + het + [htot]
-    axs[1, 1].legend(handles, [h.get_label() for h in handles], loc='upper right')
+    axs[1, 1].set_ylabel(r'$E_L/E_{\rm tot}$')
+    axs[1, 1].legend(loc='upper right')
 
     binsf = np.linspace(0.0, np.nanpercentile(frac_flat, 99.8), 70)
     axs[1, 2].hist(frac_flat, bins=binsf, density=True, histtype='step', linewidth=2.0, color='tab:red')
@@ -838,7 +655,7 @@ def generate_fields_and_metrics(n=8, ell=0.08, n0=216, k=27, seeds=(0, 1, 2, 3),
     cov = gp.extras.make_div_free_rbf_covariance(ell=ell, sigma2=sigma2, periodic=True)
 
     rows = []
-    shell_curves = {key: {'frac': [], 'elong': [], 'etot': []} for key in ('standard', 'periodic')}
+    shell_curves = {'standard': [], 'periodic': []}
     example_fields = {}
 
     for seed in seeds:
@@ -857,10 +674,8 @@ def generate_fields_and_metrics(n=8, ell=0.08, n0=216, k=27, seeds=(0, 1, 2, 3),
             eps_fd = float(ell * np.sqrt(np.mean(div_fd ** 2)) / Brms)
             div_fft, _ = divergence_fft(B, spacing)
             eps_fft = float(ell * np.sqrt(np.mean(div_fft ** 2)) / Brms)
-            shell_k, shell_frac, total_frac, *_, shell_elong, shell_etot, total_elong, total_etot = longitudinal_fraction_spectrum(B, spacing, nbins=14)
-            shell_curves[label]['frac'].append(shell_frac)
-            shell_curves[label]['elong'].append(shell_elong)
-            shell_curves[label]['etot'].append(shell_etot)
+            shell_k, shell_frac, total_frac, *_ = longitudinal_fraction_spectrum(B, spacing, nbins=14)
+            shell_curves[label].append(shell_frac)
             sx, sy, sz = seam_ratio(B)
             rows.append({
                 'seed': seed,
@@ -869,8 +684,6 @@ def generate_fields_and_metrics(n=8, ell=0.08, n0=216, k=27, seeds=(0, 1, 2, 3),
                 'eps_fd': eps_fd,
                 'eps_fft': eps_fft,
                 'longitudinal_fraction_total': float(total_frac),
-                'longitudinal_power_total': float(total_elong),
-                'spectral_power_total': float(total_etot),
                 'seam_ratio_x': sx,
                 'seam_ratio_y': sy,
                 'seam_ratio_z': sz,
@@ -906,14 +719,14 @@ def write_summary(df, n, n0, k, ell):
 def main():
     n = 30
     ell = 0.08
-    n0 = 4000
-    k = 18
+    n0 = 5000
+    k = 9
     sigma2 = 1.0
     seeds = (0, 1, 2, 3)
 
     # predecessor-search comparison figures
     figure_predecessor_search_2d(n=20, n0=250, k=27)
-    figure_predecessor_search_3d(n=4, n0=50, k=8)
+    figure_predecessor_search_3d(n=10, n0=200, k=27)
 
     # field generation and metrics
     df, shell_k, shell_curves, example_fields, coords_1d, spacing = generate_fields_and_metrics(
