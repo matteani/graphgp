@@ -32,6 +32,29 @@ from .refine import (
 )
 from . import extras
 
+# Optional NIFTy/JFT correlated-field extension. Keep this guarded so the core
+# GraphGP package remains importable in environments without nifty.re.
+try:
+    from .graph_vector_cf import (
+        GraphVectorCF,
+        MagneticCFGridKernel,
+        longitudinal_normal_from_projector_spectra,
+        magnetic_longitudinal_normal_from_spectrum,
+        magnetic_tensor_from_radial_functions,
+        make_magnetic_covariance_element,
+        magnetic_trace_correlation_length,
+        nonhelical_cross_spectrum_matrix,
+    )
+except ImportError:  # pragma: no cover - optional dependency
+    GraphVectorCF = None
+    MagneticCFGridKernel = None
+    longitudinal_normal_from_projector_spectra = None
+    magnetic_longitudinal_normal_from_spectrum = None
+    magnetic_tensor_from_radial_functions = None
+    make_magnetic_covariance_element = None
+    magnetic_trace_correlation_length = None
+    nonhelical_cross_spectrum_matrix = None
+
 __all__ = [
     "build_tree",
     "query_preceding_neighbors",
@@ -63,4 +86,12 @@ __all__ = [
     "refine_vector_inv",
     "refine_vector_logdet",
     "extras",
+    "GraphVectorCF",
+    "MagneticCFGridKernel",
+    "longitudinal_normal_from_projector_spectra",
+    "magnetic_longitudinal_normal_from_spectrum",
+    "magnetic_tensor_from_radial_functions",
+    "make_magnetic_covariance_element",
+    "magnetic_trace_correlation_length",
+    "nonhelical_cross_spectrum_matrix",
 ]
