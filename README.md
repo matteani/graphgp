@@ -45,8 +45,9 @@ values = gp.distributed.generate(plan, covariance, xi, mesh=mesh)
 ```
 
 `owners` is expressed in the original point order and may describe any
-geometric partition.  The first output dimension must be divisible by the
-number of partitions.  `partition_stats(plan)` reports graph cuts, padding,
+geometric partition.  At least one output dimension must be divisible by the
+number of partitions; the first such axis is spatially sharded.
+`partition_stats(plan)` reports graph cuts, padding,
 predicted communication, and the replication cost of the reference
 ancestor-recompute implementation.
 

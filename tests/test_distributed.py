@@ -12,7 +12,7 @@ jax.config.update("jax_enable_x64", True)
 
 def _setup(dtype=jnp.float64):
     n = 48
-    points = jnp.linspace(0.0, 1.0, n, dtype=dtype)[:, None]
+    points = jnp.linspace(0.0, 1.0, n, dtype=jnp.float64)[:, None]
     graph = gp.build_graph(points, n0=8, k=4)
     covariance = gp.extras.matern_kernel(
         p=0,
@@ -23,6 +23,11 @@ def _setup(dtype=jnp.float64):
         n_bins=64,
         jitter=1e-5,
     )
+    if dtype != jnp.float64:
+        graph = gp.Graph(
+            graph.points.astype(dtype), graph.neighbors, graph.offsets, graph.indices
+        )
+        covariance = tuple(value.astype(dtype) for value in covariance)
     return graph, covariance
 
 
@@ -54,6 +59,26 @@ def test_exchange_matches_generate_and_is_sharded():
     assert actual.sharding.mesh.shape["space"] == n_partitions
 
 
+def test_exchange_nonleading_output_axis_and_arbitrary_owners():
+    graph, covariance = _setup()
+    n_partitions = min(jax.device_count(), 4)
+    owners = np.asarray(
+        [((i * 7) + (i // 5)) % n_partitions for i in range(len(graph.points))]
+    )
+    plan = gp.distributed.partition_graph(graph, owners, output_shape=(6, 8))
+    mesh = Mesh(np.asarray(jax.devices()[:n_partitions]), ("space",))
+    xi = jr.normal(jr.key(22), (6, 8), dtype=jnp.float64)
+
+    expected = gp.generate(graph, covariance, xi.reshape(-1)).reshape(6, 8)
+    actual = gp.distributed.generate(plan, covariance, xi, mesh=mesh)
+    oracle = gp.distributed.generate_recompute(plan, covariance, xi)
+
+    assert plan.output_axis == 1
+    assert actual.sharding.spec == jax.sharding.PartitionSpec(None, "space")
+    assert jnp.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+    assert jnp.allclose(oracle, expected, rtol=1e-10, atol=1e-10)
+
+
 def test_exchange_batched_adjoint_and_covariance_gradient():
     n_partitions = min(jax.device_count(), 4)
     graph, covariance = _setup()
@@ -79,6 +104,56 @@ def test_exchange_batched_adjoint_and_covariance_gradient():
 
     cov_grad = jax.grad(lambda values: jnp.sum(generate(xi, values)))(cov_vals)
     assert jnp.all(jnp.isfinite(cov_grad))
+
+
+@pytest.mark.parametrize(
+    ("dtype", "tolerance"), [(jnp.float32, 1e-4), (jnp.float64, 1e-8)]
+)
+def test_exchange_vmap_combined_with_jvp_and_vjp(dtype, tolerance):
+    n_partitions = min(jax.device_count(), 4)
+    graph, covariance = _setup(dtype)
+    plan = gp.distributed.partition_graph(
+        graph, np.arange(len(graph.points)) % n_partitions
+    )
+    mesh = Mesh(np.asarray(jax.devices()[:n_partitions]), ("space",))
+    key_xi, key_tangent, key_cotangent = jr.split(jr.key(31), 3)
+    xi = jr.normal(key_xi, (2, len(graph.points)), dtype=dtype)
+    tangent = jr.normal(key_tangent, xi.shape, dtype=dtype)
+    cotangent = jr.normal(key_cotangent, xi.shape, dtype=dtype)
+
+    mapped = jax.vmap(
+        lambda z: gp.distributed.generate(plan, covariance, z, mesh=mesh)
+    )
+    _, jvp = jax.jvp(mapped, (xi,), (tangent,))
+    _, pullback = jax.vjp(mapped, xi)
+    vjp = pullback(cotangent)[0]
+
+    assert jnp.allclose(
+        jnp.vdot(cotangent, jvp),
+        jnp.vdot(vjp, tangent),
+        rtol=tolerance,
+        atol=tolerance,
+    )
+
+
+def test_lowered_exchange_does_not_all_gather_the_field():
+    graph, covariance = _setup()
+    n_partitions = min(jax.device_count(), 4)
+    plan = gp.distributed.partition_graph(
+        graph, np.repeat(np.arange(n_partitions), len(graph.points) // n_partitions)
+    )
+    mesh = Mesh(np.asarray(jax.devices()[:n_partitions]), ("space",))
+    xi = jnp.zeros((len(graph.points),), dtype=jnp.float64)
+    lowered = jax.jit(
+        lambda z: gp.distributed.generate(plan, covariance, z, mesh=mesh)
+    ).lower(xi)
+    hlo = lowered.as_text().lower()
+
+    assert "all_gather" in hlo or "all-gather" in hlo
+    assert "all_to_all" in hlo or "all-to-all" in hlo
+    for line in hlo.splitlines():
+        if "all_gather" in line or "all-gather" in line:
+            assert f"x{len(graph.points)}" not in line
 
 
 def test_partition_stats_and_validation():

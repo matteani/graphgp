@@ -63,6 +63,7 @@ class DistributedGraph:
     output_receive_offsets: Array
     output_receive_active: Array
     output_shape: tuple[int, ...] = field(metadata=dict(static=True))
+    output_axis: int = field(metadata=dict(static=True))
     n_partitions: int = field(metadata=dict(static=True))
     n_points: int = field(metadata=dict(static=True))
     n0: int = field(metadata=dict(static=True))
@@ -206,15 +207,27 @@ def partition_graph(graph: Graph, owners, *, output_shape=None) -> DistributedGr
             export_active[p, level, : len(exp)] = True
             export_lookup[p][level] = {node: slot for slot, node in enumerate(exp)}
 
-    if output_shape[0] % n_partitions != 0:
-        raise ValueError("output_shape[0] must be divisible by the number of partitions")
-    output_chunk = n // n_partitions
+    output_axis = next(
+        (axis for axis, size in enumerate(output_shape) if size % n_partitions == 0),
+        None,
+    )
+    if output_axis is None:
+        raise ValueError(
+            "at least one output_shape axis must be divisible by the number "
+            "of partitions"
+        )
+    local_output_shape = list(output_shape)
+    local_output_shape[output_axis] //= n_partitions
+    local_output_shape = tuple(local_output_shape)
     output_routes = [[[] for _ in range(n_partitions)] for _ in range(n_partitions)]
     for src, ids in enumerate(owned):
         for local_slot, node in enumerate(ids):
             original = int(indices[node])
-            dst = original // output_chunk
-            output_routes[src][dst].append((local_slot, original % output_chunk))
+            coordinate = list(np.unravel_index(original, output_shape))
+            dst = coordinate[output_axis] // local_output_shape[output_axis]
+            coordinate[output_axis] %= local_output_shape[output_axis]
+            local_offset = np.ravel_multi_index(coordinate, local_output_shape)
+            output_routes[src][dst].append((local_slot, int(local_offset)))
     max_output_send = max((len(route) for routes in output_routes for route in routes), default=0)
     max_output_send = max(max_output_send, 1)
     output_send_local_slots = np.zeros((n_partitions, n_partitions, max_output_send), dtype=np.int32)
@@ -277,6 +290,7 @@ def partition_graph(graph: Graph, owners, *, output_shape=None) -> DistributedGr
         output_receive_offsets=jnp.asarray(output_receive_offsets),
         output_receive_active=jnp.asarray(output_receive_active),
         output_shape=output_shape,
+        output_axis=output_axis,
         n_partitions=n_partitions,
         n_points=n,
         n0=n0,
@@ -318,9 +332,51 @@ def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_
         raise ValueError(f"xi must end in output shape {plan.output_shape}, got {xi.shape}")
     batch_shape = xi.shape[: -len(plan.output_shape)] if plan.output_shape else xi.shape
     batch_ndim = len(batch_shape)
-    xi_flat = xi.reshape(batch_shape + (plan.n_points,))
-    xi_owned = jnp.take(xi_flat, plan.owned_original, axis=-1)
-    xi_owned = xi_owned * plan.owned_active
+    xi_spec = _partitioned_spec(batch_ndim + 2, batch_ndim, axis_name)
+    field_axes = [None] * (batch_ndim + len(plan.output_shape))
+    field_axes[batch_ndim + plan.output_axis] = axis_name
+    field_spec = P(*field_axes)
+
+    def route_excitations(xi_block, receive_offsets, receive_mask, owned_slots, owned_mask):
+        receive_offsets = jnp.squeeze(receive_offsets, axis=0)
+        receive_mask = jnp.squeeze(receive_mask, axis=0)
+        owned_slots = jnp.squeeze(owned_slots, axis=0)
+        owned_mask = jnp.squeeze(owned_mask, axis=0)
+        local_xi = xi_block.reshape(batch_shape + (-1,))
+        sends = jnp.take(local_xi, receive_offsets, axis=-1) * receive_mask
+        received = lax.all_to_all(
+            sends,
+            axis_name,
+            split_axis=batch_ndim,
+            concat_axis=batch_ndim,
+            tiled=False,
+        )
+        local_owned = jnp.zeros(
+            batch_shape + (plan.max_owned,), dtype=xi_block.dtype
+        )
+        local_owned = local_owned.at[..., owned_slots].add(received * owned_mask)
+        return jnp.expand_dims(local_owned, axis=batch_ndim)
+
+    route = _shard_map(
+        route_excitations,
+        mesh=mesh,
+        in_specs=(
+            field_spec,
+            _local_spec(plan.output_receive_offsets.ndim, axis_name),
+            _local_spec(plan.output_receive_active.ndim, axis_name),
+            _local_spec(plan.output_send_local_slots.ndim, axis_name),
+            _local_spec(plan.output_send_active.ndim, axis_name),
+        ),
+        out_specs=xi_spec,
+        check_rep=False,
+    )
+    xi_owned = route(
+        xi,
+        plan.output_receive_offsets,
+        plan.output_receive_active,
+        plan.output_send_local_slots,
+        plan.output_send_active,
+    )
 
     local_arrays = (
         plan.owned_topological,
@@ -342,8 +398,7 @@ def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_
         plan.output_receive_active,
     )
     local_specs = tuple(_local_spec(a.ndim, axis_name) for a in local_arrays)
-    xi_spec = _partitioned_spec(xi_owned.ndim, batch_ndim, axis_name)
-    output_spec = P(*([None] * batch_ndim + [axis_name] + [None] * (len(plan.output_shape) - 1)))
+    output_spec = field_spec
 
     def local_generate(xi_block, arrays, seed_source, seed_source_slot, cov_bins, cov_vals, seed_points):
         xi_local = jnp.squeeze(xi_block, axis=batch_ndim)
@@ -431,7 +486,9 @@ def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_
         )
         local_output = jnp.zeros(batch_shape + (plan.n_points // plan.n_partitions,), dtype=values.dtype)
         local_output = local_output.at[..., output_receive_offsets].add(output_receive * output_receive_mask)
-        local_shape = (plan.output_shape[0] // plan.n_partitions,) + plan.output_shape[1:]
+        local_shape = list(plan.output_shape)
+        local_shape[plan.output_axis] //= plan.n_partitions
+        local_shape = tuple(local_shape)
         return local_output.reshape(batch_shape + local_shape)
 
     cov_bins, cov_vals = covariance
@@ -536,7 +593,15 @@ def partition_stats(plan: DistributedGraph) -> PartitionStats:
     return PartitionStats(
         owned_nodes=tuple(int(i) for i in owned_active.sum(axis=1)),
         cross_partition_parents=cross,
-        communicated_values_per_evaluation=int(plan.n_partitions * (plan.max_seed + export_active.sum())),
+        communicated_values_per_evaluation=int(
+            plan.n_partitions
+            * plan.n_partitions
+            * (
+                plan.max_seed
+                + plan.n_levels * plan.max_boundary
+                + 2 * plan.max_output_send
+            )
+        ),
         owned_padding_fraction=float(1.0 - owned_active.mean()),
         level_padding_fraction=float(1.0 - level_active.mean()),
         boundary_padding_fraction=float(1.0 - export_active.mean()),
