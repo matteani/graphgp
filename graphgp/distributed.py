@@ -8,6 +8,7 @@ its owner and remote parent values are exchanged between dependency levels.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 
 import jax
 import jax.numpy as jnp
@@ -20,6 +21,15 @@ try:  # JAX >= 0.6
     from jax import shard_map as _shard_map
 except ImportError:  # JAX 0.5
     from jax.experimental.shard_map import shard_map as _shard_map
+
+_SHARD_MAP_SUPPORTS_CHECK_REP = "check_rep" in inspect.signature(_shard_map).parameters
+
+
+def _distributed_shard_map(fun, **kwargs):
+    """Call shard_map across the JAX 0.5 and current APIs."""
+    if _SHARD_MAP_SUPPORTS_CHECK_REP:
+        kwargs["check_rep"] = False
+    return _shard_map(fun, **kwargs)
 
 from .graph import Graph, check_graph
 from .refine import (
@@ -62,18 +72,18 @@ class DistributedGraph:
     output_send_active: Array
     output_receive_offsets: Array
     output_receive_active: Array
-    output_shape: tuple[int, ...] = field(metadata=dict(static=True))
-    output_axis: int = field(metadata=dict(static=True))
-    n_partitions: int = field(metadata=dict(static=True))
-    n_points: int = field(metadata=dict(static=True))
-    n0: int = field(metadata=dict(static=True))
-    k: int = field(metadata=dict(static=True))
-    n_levels: int = field(metadata=dict(static=True))
-    max_owned: int = field(metadata=dict(static=True))
-    max_level: int = field(metadata=dict(static=True))
-    max_seed: int = field(metadata=dict(static=True))
-    max_boundary: int = field(metadata=dict(static=True))
-    max_output_send: int = field(metadata=dict(static=True))
+    output_shape: tuple[int, ...] = field(metadata={"static": True})
+    output_axis: int = field(metadata={"static": True})
+    n_partitions: int = field(metadata={"static": True})
+    n_points: int = field(metadata={"static": True})
+    n0: int = field(metadata={"static": True})
+    k: int = field(metadata={"static": True})
+    n_levels: int = field(metadata={"static": True})
+    max_owned: int = field(metadata={"static": True})
+    max_level: int = field(metadata={"static": True})
+    max_seed: int = field(metadata={"static": True})
+    max_boundary: int = field(metadata={"static": True})
+    max_output_send: int = field(metadata={"static": True})
 
 
 @dataclass(frozen=True)
@@ -357,7 +367,7 @@ def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_
         local_owned = local_owned.at[..., owned_slots].add(received * owned_mask)
         return jnp.expand_dims(local_owned, axis=batch_ndim)
 
-    route = _shard_map(
+    route = _distributed_shard_map(
         route_excitations,
         mesh=mesh,
         in_specs=(
@@ -492,7 +502,7 @@ def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_
         return local_output.reshape(batch_shape + local_shape)
 
     cov_bins, cov_vals = covariance
-    mapped = _shard_map(
+    mapped = _distributed_shard_map(
         local_generate,
         mesh=mesh,
         in_specs=(
