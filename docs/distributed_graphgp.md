@@ -20,56 +20,56 @@ sharded line-of-sight operator.
 
 ## Mathematical recap
 
-Let (x_iinmathbb{R}^d) be the locations at which a field is represented and
-let (k(r)) be the stationary covariance kernel.  A dense Gaussian process
+Let $x_i\in\mathbb{R}^d$ be the locations at which a field is represented and
+let $k(r)$ be the stationary covariance kernel.  A dense Gaussian process
 would have
 
-\[
+$$
   f \sim \mathcal{N}(0, K), \qquad K_{ij}=k(\lVert x_i-x_j\rVert).
-\]
+$$
 
 GraphGP uses the Vecchia/nearest-neighbor factorization.  The points are put
 in an ordering such that every non-initial point has a set of earlier parent
-points (P_i).  Instead of conditioning on all earlier points, GraphGP keeps
-only (k) preceding neighbors.  This makes the factorization sparse and gives
-linear storage and execution cost for fixed (k).
+points $P_i$.  Instead of conditioning on all earlier points, GraphGP keeps
+only $k$ preceding neighbors.  This makes the factorization sparse and gives
+linear storage and execution cost for fixed $k$.
 
 ### Dense seed
 
-The first (n_0) points are treated densely.  If (K_0) is their covariance
-matrix and (K_0=L_0L_0^\mathsf{T}), then for white-noise excitations
-\(\xi_0\sim\mathcal{N}(0,I)\),
+The first $n_0$ points are treated densely.  If $K_0$ is their covariance
+matrix and $K_0=L_0L_0^\mathsf{T}$, then for white-noise excitations
+$\xi_0\sim\mathcal{N}(0,I)$,
 
-\[
+$$
   f_0 = L_0\xi_0.
-\]
+$$
 
 The seed is the only part deliberately replicated by the distributed
 implementation; it should remain small compared with the full field.
 
 ### Conditional refinement
 
-For a later point (i), form the covariance matrix of its parents and the
+For a later point $i$, form the covariance matrix of its parents and the
 point itself:
 
-\[
+$$
   C_i = K(P_i\cup\{x_i\}, P_i\cup\{x_i\}) = L_iL_i^\mathsf{T}.
-\]
+$$
 
-Writing (k=|P_i|), the implementation obtains the conditional weights and
+Writing $k=|P_i|$, the implementation obtains the conditional weights and
 standard deviation from the Cholesky factor:
 
-\[
+$$
   w_i = L_i[P_i,P_i]^{-\mathsf{T}} L_i[x_i,P_i],
   \qquad
   \sigma_i = L_i[x_i,x_i].
-\]
+$$
 
 The generated value is then
 
-\[
+$$
   f_i = w_i^\mathsf{T}f_{P_i} + \sigma_i\xi_i.
-\]
+$$
 
 Thus the distributed path must provide exactly the same parent values and use
 exactly the same covariance/conditional calculation as the ordinary
@@ -80,12 +80,12 @@ the kernel is linearly interpolated between radii.
 
 `build_graph` first constructs a GPU-friendly k-d-tree ordering.  It retains
 the permutation back to the caller's original point order.  For every point
-after the seed it queries (k) nearest points that precede it in this order.
+after the seed it queries $k$ nearest points that precede it in this order.
 
 The result is a DAG represented by:
 
 - `points`: points in topological/tree order;
-- `neighbors`: the (k) preceding parents for every non-seed point;
+- `neighbors`: the $k$ preceding parents for every non-seed point;
 - `offsets`: boundaries of dependency levels/batches;
 - `indices`: the permutation between original and internal point order.
 
@@ -94,7 +94,7 @@ depends on another point in that same level.  Therefore all points in one
 level can be generated in parallel once earlier levels are available.
 
 The structure is tree-derived but the execution graph is a bounded-parent DAG:
-a node can be used by many later nodes, and each node has up to (k) parents.
+a node can be used by many later nodes, and each node has up to $k$ parents.
 The dependency level, rather than the k-d-tree depth alone, determines the
 safe execution order.
 
