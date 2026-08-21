@@ -29,7 +29,15 @@ def _distributed_shard_map(fun, **kwargs):
     """Call shard_map across the JAX 0.5 and current APIs."""
     if _SHARD_MAP_SUPPORTS_CHECK_REP:
         kwargs["check_rep"] = False
-    return _shard_map(fun, **kwargs)
+    try:
+        return _shard_map(fun, **kwargs)
+    except TypeError as error:
+        # Some newer JAX releases retain a permissive signature while
+        # rejecting this removed keyword when the map is constructed.
+        if "check_rep" not in kwargs or "check_rep" not in str(error):
+            raise
+        kwargs.pop("check_rep")
+        return _shard_map(fun, **kwargs)
 
 from .graph import Graph, check_graph
 from .refine import (
