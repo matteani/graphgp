@@ -55,6 +55,11 @@ The distributed backend is pure JAX and supports `jit`, leading batch axes,
 JVP, VJP, and gradients with respect to discretized covariance values.  The
 CUDA extension is currently limited to single-device generation.
 
+For low-level multi-GPU experiments independent of JAX, the repository also
+contains a standalone [native CUDA/NCCL DAG sharding benchmark](benchmarks/cuda_graph_sharding/README.md).
+It compares balanced random ownership, parent-affinity ownership, and replicated
+ancestor closures without changing the GraphGP Python API.
+
 For the mathematical model, execution sequence, communication layout, and
 current limitations, see [the distributed GraphGP design note](docs/distributed_graphgp.md).
 
