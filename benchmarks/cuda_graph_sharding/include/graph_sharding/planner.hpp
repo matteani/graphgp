@@ -65,6 +65,14 @@ struct RankPlan {
   std::vector<std::int32_t> parent_refs;
   std::vector<std::uint32_t> send_local_slots;
   std::vector<std::uint32_t> primary_slots;
+  // Ancestor-closure synchronization. The send list contains primary slots,
+  // grouped by replica destination. The receive list contains replica slots,
+  // grouped by primary source. Gradient reduction traverses the same mapping
+  // in the opposite direction.
+  std::vector<std::uint32_t> replica_send_slots;
+  std::vector<std::uint32_t> replica_recv_slots;
+  std::vector<std::size_t> replica_send_offsets;
+  std::vector<std::size_t> replica_recv_offsets;
   std::vector<LevelPlan> levels;
   std::size_t max_send_values = 0;
   std::size_t max_recv_values = 0;
@@ -76,6 +84,8 @@ struct PlanStats {
   std::size_t cut_edges = 0;
   std::size_t communicated_values = 0;
   std::size_t messages = 0;
+  std::size_t replica_values = 0;
+  std::size_t replica_messages = 0;
   double load_imbalance = 1.0;
   double replication_factor = 1.0;
 };
@@ -97,5 +107,7 @@ void validate_execution_plan(const Graph& graph, const Partition& primary_partit
 
 std::vector<std::size_t> estimate_device_bytes(const ExecutionPlan& plan,
                                                std::size_t value_bytes);
+std::vector<std::size_t> estimate_iterative_device_bytes(const ExecutionPlan& plan,
+                                                         std::size_t value_bytes);
 
 }  // namespace graph_sharding

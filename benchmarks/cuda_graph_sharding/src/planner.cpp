@@ -261,6 +261,8 @@ ExecutionPlan make_exchange_plan(const Graph& graph, const Partition& partition)
         rp.primary_slots.push_back(static_cast<std::uint32_t>(rp.global_nodes.size() - 1));
       }
     }
+    rp.replica_send_offsets.assign(partition.ranks + 1, 0);
+    rp.replica_recv_offsets.assign(partition.ranks + 1, 0);
     rp.levels.resize(graph.config.levels);
   }
 
@@ -352,6 +354,7 @@ ExecutionPlan make_ancestor_closure_plan(const Graph& graph, const Partition& pa
   plan.stats.communicated_values = 0;
   plan.stats.messages = 0;
   std::size_t total_stored = 0;
+  std::vector<std::int32_t> primary_slot_by_node(graph.config.nodes, -1);
   for (std::size_t rank = 0; rank < partition.ranks; ++rank) {
     std::vector<std::uint8_t> included(graph.config.nodes, 0);
     for (std::size_t node = 0; node < graph.config.nodes; ++node) {
@@ -371,7 +374,11 @@ ExecutionPlan make_ancestor_closure_plan(const Graph& graph, const Partition& pa
       rp.global_nodes.push_back(static_cast<NodeId>(node));
       const bool primary = partition.owners[node] == static_cast<Rank>(rank);
       rp.primary.push_back(primary);
-      if (primary) rp.primary_slots.push_back(static_cast<std::uint32_t>(rp.global_nodes.size() - 1));
+      if (primary) {
+        const auto slot = static_cast<std::uint32_t>(rp.global_nodes.size() - 1);
+        rp.primary_slots.push_back(slot);
+        primary_slot_by_node[node] = static_cast<std::int32_t>(slot);
+      }
     }
     rp.levels.resize(graph.config.levels);
     for (std::size_t level = 0; level < graph.config.levels; ++level) {
@@ -399,6 +406,53 @@ ExecutionPlan make_ancestor_closure_plan(const Graph& graph, const Partition& pa
     total_stored += rp.global_nodes.size();
     plan.stats.stored_nodes.push_back(rp.global_nodes.size());
   }
+
+  // Build one graph-wide sparse primary-to-replica exchange. Lists are sorted
+  // by global node ID so peer segments match exactly and deterministically.
+  std::vector<std::vector<std::vector<NodeId>>> replicas(
+      partition.ranks, std::vector<std::vector<NodeId>>(partition.ranks));
+  for (std::size_t dst = 0; dst < partition.ranks; ++dst) {
+    const auto& rp = plan.rank_plans[dst];
+    for (std::size_t slot = 0; slot < rp.global_nodes.size(); ++slot) {
+      if (rp.primary[slot]) continue;
+      const NodeId node = rp.global_nodes[slot];
+      const auto src = static_cast<std::size_t>(partition.owners[node]);
+      replicas[dst][src].push_back(node);
+    }
+    for (auto& peer_nodes : replicas[dst]) std::sort(peer_nodes.begin(), peer_nodes.end());
+  }
+  for (std::size_t rank = 0; rank < partition.ranks; ++rank) {
+    auto& rp = plan.rank_plans[rank];
+    rp.replica_send_offsets.assign(partition.ranks + 1, 0);
+    rp.replica_recv_offsets.assign(partition.ranks + 1, 0);
+    for (std::size_t peer = 0; peer < partition.ranks; ++peer) {
+      rp.replica_send_offsets[peer] = rp.replica_send_slots.size();
+      for (NodeId node : replicas[peer][rank]) {
+        const auto slot = primary_slot_by_node[node];
+        require(slot >= 0 && rp.primary[slot], "replica source is not primary-owned");
+        rp.replica_send_slots.push_back(static_cast<std::uint32_t>(slot));
+      }
+      rp.replica_send_offsets[peer + 1] = rp.replica_send_slots.size();
+
+      rp.replica_recv_offsets[peer] = rp.replica_recv_slots.size();
+      for (NodeId node : replicas[rank][peer]) {
+        const auto found = std::lower_bound(rp.global_nodes.begin(), rp.global_nodes.end(), node);
+        require(found != rp.global_nodes.end() && *found == node,
+                "replica destination is not stored");
+        const auto slot = static_cast<std::size_t>(found - rp.global_nodes.begin());
+        require(!rp.primary[slot], "replica destination is not replicated");
+        rp.replica_recv_slots.push_back(static_cast<std::uint32_t>(slot));
+      }
+      rp.replica_recv_offsets[peer + 1] = rp.replica_recv_slots.size();
+    }
+  }
+  for (std::size_t dst = 0; dst < partition.ranks; ++dst) {
+    for (std::size_t src = 0; src < partition.ranks; ++src) {
+      if (replicas[dst][src].empty()) continue;
+      plan.stats.replica_values += replicas[dst][src].size();
+      plan.stats.replica_messages++;
+    }
+  }
   plan.stats.replication_factor = static_cast<double>(total_stored) / graph.config.nodes;
   validate_execution_plan(graph, partition, plan);
   return plan;
@@ -415,6 +469,15 @@ void validate_execution_plan(const Graph& graph, const Partition& partition,
     require(rp.level_nodes.size() * graph.config.parents == rp.parent_refs.size(),
             "parent references have wrong size");
     require(rp.levels.size() == graph.config.levels, "rank level count is wrong");
+    require(rp.replica_send_offsets.size() == plan.ranks + 1 &&
+                rp.replica_recv_offsets.size() == plan.ranks + 1,
+            "invalid replica peer offsets");
+    require(std::is_sorted(rp.replica_send_offsets.begin(), rp.replica_send_offsets.end()) &&
+                std::is_sorted(rp.replica_recv_offsets.begin(), rp.replica_recv_offsets.end()),
+            "replica peer offsets must be sorted");
+    require(rp.replica_send_offsets.back() == rp.replica_send_slots.size() &&
+                rp.replica_recv_offsets.back() == rp.replica_recv_slots.size(),
+            "replica offsets do not span their slot lists");
     std::unordered_set<NodeId> stored(rp.global_nodes.begin(), rp.global_nodes.end());
     for (std::size_t slot = 0; slot < rp.global_nodes.size(); ++slot) {
       if (rp.primary[slot]) {
@@ -442,6 +505,14 @@ void validate_execution_plan(const Graph& graph, const Partition& partition,
     for (auto slot : rp.primary_slots) {
       require(slot < rp.primary.size() && rp.primary[slot], "invalid primary output slot");
     }
+    for (auto slot : rp.replica_send_slots) {
+      require(slot < rp.primary.size() && rp.primary[slot],
+              "replica synchronization source is not primary");
+    }
+    for (auto slot : rp.replica_recv_slots) {
+      require(slot < rp.primary.size() && !rp.primary[slot],
+              "replica synchronization destination is not replicated");
+    }
     (void)stored;
   }
   require(std::all_of(primary_counts.begin(), primary_counts.end(), [](std::size_t count) { return count == 1; }),
@@ -457,6 +528,14 @@ void validate_execution_plan(const Graph& graph, const Partition& partition,
       }
     }
   }
+  for (std::size_t src = 0; src < plan.ranks; ++src) {
+    for (std::size_t dst = 0; dst < plan.ranks; ++dst) {
+      const auto& send = plan.rank_plans[src].replica_send_offsets;
+      const auto& recv = plan.rank_plans[dst].replica_recv_offsets;
+      require(send[dst + 1] - send[dst] == recv[src + 1] - recv[src],
+              "replica send and receive counts do not match");
+    }
+  }
 }
 
 std::vector<std::size_t> estimate_device_bytes(const ExecutionPlan& plan,
@@ -470,6 +549,24 @@ std::vector<std::size_t> estimate_device_bytes(const ExecutionPlan& plan,
                    rp.send_local_slots.size() * sizeof(std::uint32_t) +
                    rp.primary_slots.size() * sizeof(std::uint32_t) +
                    (rp.max_send_values + rp.max_recv_values + 1) * value_bytes;
+  }
+  return result;
+}
+
+std::vector<std::size_t> estimate_iterative_device_bytes(const ExecutionPlan& plan,
+                                                         std::size_t value_bytes) {
+  std::vector<std::size_t> result(plan.ranks, 0);
+  for (std::size_t rank = 0; rank < plan.ranks; ++rank) {
+    const auto& rp = plan.rank_plans[rank];
+    const auto send_values = std::max(rp.max_send_values, rp.replica_send_slots.size());
+    const auto recv_values = std::max(rp.max_recv_values, rp.replica_recv_slots.size());
+    result[rank] = rp.global_nodes.size() * (3 * value_bytes + sizeof(NodeId)) +
+                   rp.level_nodes.size() * sizeof(std::uint32_t) +
+                   rp.parent_refs.size() * sizeof(std::int32_t) +
+                   (rp.send_local_slots.size() + rp.primary_slots.size() +
+                    rp.replica_send_slots.size() + rp.replica_recv_slots.size()) *
+                       sizeof(std::uint32_t) +
+                   (send_values + recv_values + 1) * value_bytes;
   }
   return result;
 }
