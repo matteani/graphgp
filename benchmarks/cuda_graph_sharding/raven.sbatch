@@ -3,6 +3,8 @@
 #SBATCH --output=graph-sharding.%j.out
 #SBATCH --error=graph-sharding.%j.err
 #SBATCH --nodes=1
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=matteani@mpa-garching.mpg.de
 #SBATCH --ntasks=1
 #SBATCH --constraint=gpu
 #SBATCH --gres=gpu:a100:4
