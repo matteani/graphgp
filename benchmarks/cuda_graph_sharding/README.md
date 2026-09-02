@@ -103,7 +103,7 @@ per GPU node.
 For an initial iterative job using the batch script:
 
 ```bash
-MODE=iterative EVALUATIONS_PER_RUN=100 sbatch benchmarks/cuda_graph_sharding/raven.sbatch
+MODE=iterative EVALUATIONS_PER_RUN=100 sbatch raven.sbatch
 ```
 
 To collect the strong-scaling/locality grid inside an allocation, use:
