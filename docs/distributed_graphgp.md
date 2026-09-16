@@ -237,6 +237,9 @@ communication volume and peak HBM usage.
 
 The branch currently has these deliberate limitations:
 
+- Distributed generation supports scalar fields only. Vector covariance callables
+  are rejected; use `graphgp.generate_vector` on a single device for vector fields.
+
 - one-dimensional device mesh (`space` by convention);
 - host-side partition compilation;
 - padded `all_gather` boundary exchange;

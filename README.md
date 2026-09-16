@@ -63,6 +63,42 @@ ancestor closures without changing the GraphGP Python API.
 For the mathematical model, execution sequence, communication layout, and
 current limitations, see [the distributed GraphGP design note](docs/distributed_graphgp.md).
 
+## Vector and magnetic fields
+
+Vector-valued fields use a callable `cov_elem(x, y)` returning a square component
+covariance matrix. For a 3D magnetic field, white noise and output both have
+shape `(N, 3)`:
+
+```python
+import jax.random as jr
+
+jax.config.update("jax_enable_x64", True)
+points = jr.uniform(jr.key(1), (1000, 3))
+graph = gp.build_graph(points, n0=50, k=10)
+cov_elem = gp.extras.make_div_free_rbf_covariance(ell=0.1, periodic=False)
+xi = jr.normal(jr.key(2), (len(points), 3))
+B = jax.jit(lambda z: gp.generate_vector(graph, cov_elem, z))(xi)
+```
+
+`generate_vector_inv` and `generate_vector_logdet` provide the corresponding
+inverse and log determinant. Dense and conditional refinement variants are also
+available. To combine a scalar radial kernel with correlated components, use
+`make_separable_vector_covariance(covariance, component_cov)`.
+
+Vector generation currently runs on a single device. The distributed backend
+supports scalar fields and rejects vector covariance callables. `cuda=True`
+requires an extension providing the colleague's vector kernels; the pure JAX
+path (`cuda=False`) also runs on a single GPU when available.
+
+The implementation and examples were merged from
+[graphgp-vectors](https://gitlab.mpcdf.mpg.de/mw-atlas/graphgp-vectors), main commit
+`b9dba053783db5aa31f1231d78aec73495e4e526`. See
+[the magnetic-field realization example](vector-demos/vector-realisations/B-field_realisations.py).
+The covariance is analytically divergence-free; nearest-neighbor conditioning
+and finite-difference diagnostics introduce approximation error in realizations.
+Periodic graph construction requires SciPy. The additional correlated-field
+models require `nifty.re`, which is optional for the core package.
+
 ## Installation
 To install, use pip. The only dependency is JAX.
 

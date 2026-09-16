@@ -1,8 +1,8 @@
 """Exact distributed execution for GraphGP dependency graphs.
 
 Graph construction and partition planning happen on the host.  Runtime
-generation is a pure-JAX SPMD computation: every graph node is evaluated by
-its owner and remote parent values are exchanged between dependency levels.
+generation for scalar fields is a pure-JAX SPMD computation: every graph node
+is evaluated by its owner and remote parent values are exchanged between dependency levels.
 """
 
 from __future__ import annotations
@@ -332,6 +332,14 @@ def _local_spec(ndim, axis_name):
     return P(axis_name, *([None] * (ndim - 1)))
 
 
+def _require_scalar_covariance(covariance):
+    if callable(covariance):
+        raise NotImplementedError(
+            "Distributed generation does not support vector fields. "
+            "Use graphgp.generate_vector on a single device."
+        )
+
+
 def _batched_dense(points, covariance, xi):
     K = compute_cov_matrix(covariance, points, points)
     L = jnp.linalg.cholesky(K)
@@ -339,7 +347,9 @@ def _batched_dense(points, covariance, xi):
 
 
 def generate(plan: DistributedGraph, covariance, xi: Array, *, mesh: Mesh, axis_name="space") -> Array:
-    """Generate the exact GraphGP field with one owner per graph node."""
+    """Generate the exact scalar GraphGP field with one owner per graph node."""
+
+    _require_scalar_covariance(covariance)
 
     if mesh.shape.get(axis_name) != plan.n_partitions:
         raise ValueError(
@@ -551,7 +561,9 @@ def _closure(graph: Graph, owned_topological):
 
 
 def generate_recompute(plan: DistributedGraph, covariance, xi: Array) -> Array:
-    """Exact ancestor-recompute oracle using full host-side partition metadata."""
+    """Exact scalar ancestor-recompute oracle using full host-side partition metadata."""
+
+    _require_scalar_covariance(covariance)
 
     xi = jnp.asarray(xi)
     batch_shape = xi.shape[: -len(plan.output_shape)] if plan.output_shape else xi.shape
